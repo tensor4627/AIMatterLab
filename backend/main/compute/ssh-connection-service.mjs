@@ -5,6 +5,7 @@ import {isDeepStrictEqual as equal} from 'node:util';
 import {posix} from 'node:path';
 import {prepareSshServiceResourcesAsync,shippedSshServiceManifest} from './ssh-service-resources.mjs';
 import {safeSshServiceError,safeSshServicePhase,safeSshServiceProgress} from './ssh-service-state.mjs';
+import {sameRegistrationIdentity} from './ssh-service-registration.mjs';
 import {assertTaskWorker} from '../../../contracts/compute/task-worker-binding.mjs';
 const object=v=>!!v&&typeof v==='object'&&!Array.isArray(v),id=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(v);
 const fail=code=>{throw Error(code);};
@@ -20,6 +21,9 @@ export function normalizeSshServiceHealth(value){
  return report;
 }
 const sameHealth=(a,b)=>['root','runtime','runtimeId','port'].every(k=>a[k]===b[k])&&equal(a.hostIdentity,b.hostIdentity);
+const registrationIdentityOptions={includeIdentityGeneration:true};
+const registeredHealthMatches=(health,saved)=>sameHealth(health,saved)&&
+ (!saved.runtimeManifestSha256||health.runtimeManifestSha256===saved.runtimeManifestSha256);
 function verifiedLiveHealth(ready,value){
  const live=normalizeSshServiceHealth(value);
  if(!sameHealth(ready,live)||ready.runtimeManifestSha256&&live.runtimeManifestSha256&&ready.runtimeManifestSha256!==live.runtimeManifestSha256)fail('ssh_service_identity_changed');
@@ -121,7 +125,7 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
   try{
    if(!registration)fail('ssh_service_registration_required');
    const registered=registration.read({profileId:reference.profileId,profileVersion:reference.profileVersion}),maintenance=registered.status==='maintenance_required'&&registered.reason==='worker_health_invalid';
-   const saved=maintenance?registered.registration:registration.validateReuse(profile);
+   const saved=maintenance?registered.registration:registration.validateReuse(profile,undefined,registrationIdentityOptions);
    if(!saved)fail('ssh_service_registration_required');
    fresh();await authenticated(reference);fresh();
    const observed=await connections.serviceState({connectionId:data.connectionId});fresh();
@@ -135,9 +139,9 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
     if(!startupCancelled(origin,cancelled)||!viewMatches(view,cancelled)||!livePrivate(reference,cancelled))fail('ssh_service_context_changed');
    }
    const verifyRegistration=health=>{
-    if(!sameHealth(health,saved)||saved.runtimeManifestSha256&&health.runtimeManifestSha256!==saved.runtimeManifestSha256)fail('ssh_service_identity_changed');
+    if(!registeredHealthMatches(health,saved))fail('ssh_service_identity_changed');
     if(maintenance)registration.validateReconciliation(profile,saved);
-    else if(!equal(registration.validateReuse(profile,health),saved))fail('ssh_service_registration_changed');
+    else if(!sameRegistrationIdentity(saved,registration.validateReuse(profile,health,registrationIdentityOptions)))fail('ssh_service_registration_changed');
    };
    const ready=normalizeSshServiceHealth(view);verifyRegistration(ready);
    const startedAt=Date.now(),owned={...data,attemptId:view.attemptId,serviceId:view.serviceId,status:'connected',active:true,dispatched:false,observedActive:true,phase:'ready',startedAt,phaseStartedAt:startedAt};
@@ -211,10 +215,23 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
   if(record?.status==='failed'&&record.active===false)record=null;if(record)fail('ssh_service_channel_in_use');
   const ticket=resource.capture(),owner=structuredClone(current()),intent=++serial,startedAt=Date.now(),attempt={...data,attemptId:data.requestId,status:'connecting',active:false,dispatched:false,phase:'preparing_local',startedAt,phaseStartedAt:startedAt};
   const fresh=()=>{if(intent!==serial||!conversationChannel&&!equal(owner,current())||record!==attempt)fail('ssh_service_context_changed');resource.assertCurrent(ticket);if(!selectedRecord(attempt))fail('ssh_service_selection_changed');profiles.read({id:data.profileId,version:data.profileVersion});updateOrigin?.assertCurrent();};
+  const reference={profileId:profile.id,profileVersion:profile.version};
+  let registered;
   revokeGrant();record=attempt;changed();const promise=(async()=>{try{
-   await authenticated(attempt);fresh();const mode=data.mode||'setup',reuse=['reuse','check'].includes(mode);let saved,reconciling=false,healthMaintenance=false;
-   if(reuse){if(!registration)fail('ssh_service_registration_required');const view=registration.read({profileId:profile.id,profileVersion:profile.version});healthMaintenance=view.status==='maintenance_required'&&view.reason==='worker_health_invalid';saved=healthMaintenance?view.registration:mode==='reuse'?registration.validateReuse(profile):view.registration;if(!saved)fail('ssh_service_registration_required');}
+   await authenticated(attempt);fresh();const mode=data.mode||'setup',reuse=['reuse','check'].includes(mode);
+   let saved,reconciling=false,healthMaintenance=false;
+   if(reuse){
+    if(!registration)fail('ssh_service_registration_required');
+    const view=registration.read(reference);
+    healthMaintenance=view.status==='maintenance_required'&&view.reason==='worker_health_invalid';
+    saved=healthMaintenance?view.registration:mode==='reuse'?registration.validateReuse(profile):view.registration;
+    registered=registration.read(reference,registrationIdentityOptions);
+    if(!saved)fail('ssh_service_registration_required');
+   }
    const registrationFresh=()=>registration.validateReconciliation(profile,saved);
+   const checkRegistrationWrite=()=>{
+    if(registered&&!equal(registered,registration.read(reference,registrationIdentityOptions)))fail('ssh_service_registration_changed');
+   };
    if(reuse){
     // Hosted SSH and the foreground workflow use the same authenticated
     // connection. Bind its already started private service without opening,
@@ -232,20 +249,27 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
      applyView(attempt,observed);
      if(observed.status!=='connected'||observed.channelKind!=='private'||!id(observed.serviceId))fail('ssh_service_unavailable');
      const health=normalizeSshServiceHealth(observed);
-     if(!sameHealth(health,saved)||saved.runtimeManifestSha256&&health.runtimeManifestSha256!==saved.runtimeManifestSha256)fail('ssh_service_identity_changed');
-     if(healthMaintenance)registrationFresh();else registration.validateReuse(profile,health);
+     if(!registeredHealthMatches(health,saved))fail('ssh_service_identity_changed');
+     const verifyRegistration=()=>{
+      if(healthMaintenance)registrationFresh();
+      else if(!sameRegistrationIdentity(registered.registration,registration.validateReuse(profile,undefined,registrationIdentityOptions)))fail('ssh_service_registration_changed');
+     };
+     verifyRegistration();
      attempt.health=health;phase(attempt,'checking_health');
      const identity=await attach(attempt,fresh);
      phase(attempt,'checking_tools');const tools=await checkedTools(attempt);fresh();
+     verifyRegistration();
      if(healthMaintenance)registration.rememberVerifiedReuse(profile,saved,health,tools);
      await remember(identity,attempt.health);fresh();attempt.status='connected';delete attempt.error;phase(attempt,'ready');return {...safe(),tools};
     }
    }
    if(existingOnly)fail('ssh_service_unavailable');
    const prepare=async()=>{
+    checkRegistrationWrite();
     if(reconciling||healthMaintenance)registrationFresh();
     const expectedRuntimeId=reconciling?undefined:reuse?saved.runtimeId:mode==='update'?undefined:preferredRuntimeId(profile);
     const value=await prepareResources(source,{profileId:data.profileId,...reuse?{port:saved.port,reuseOnly:true,...reconciling?{verifiedCacheOnly:true}:saved.runtimeManifestSha256?{expectedRuntimeManifestSha256:saved.runtimeManifestSha256}:{}}:{},...transportSource?{transportSource}:{},...expectedRuntimeId?{expectedRuntimeId}:{}});fresh();await authenticated(attempt);fresh();
+    checkRegistrationWrite();
     if(reconciling||healthMaintenance)registrationFresh();
     if(reconciling){const p=value?.payload;if(!Array.isArray(p?.files)||p.files.length!==0||!/^[a-f0-9]{64}$/.test(p.runtime_manifest_sha256||'')||p.runtime_manifest_sha256.slice(0,20)!==p.expected_runtime_id)fail('ssh_service_resources_invalid');}
     return value;
@@ -273,13 +297,26 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
     if(candidate.payload.expected_runtime_id===saved.runtimeId){if(saved.runtimeManifestSha256!==undefined&&candidate.payload.runtime_manifest_sha256!==saved.runtimeManifestSha256)fail('ssh_service_identity_changed');reconciling=false;}
     else{bootstrap=candidate;attempt.attemptId=randomUUID();result=await open(bootstrap);}
    }
-   if(result.status!=='connected'||result.serviceActive!==true){attempt.status=result.serviceActive===false?'failed':'unknown';attempt.error=safeSshServiceError(result.error||'connection_unconfirmed',attempt.phase);if(reuse)maintenance(profile,attempt.error.code);changed();return safe();}if(!id(result.serviceId))fail('ssh_service_identity_unavailable');
+   if(result.status!=='connected'||result.serviceActive!==true){checkRegistrationWrite();attempt.status=result.serviceActive===false?'failed':'unknown';attempt.error=safeSshServiceError(result.error||'connection_unconfirmed',attempt.phase);if(reuse)maintenance(profile,attempt.error.code);changed();return safe();}if(!id(result.serviceId))fail('ssh_service_identity_unavailable');
    const health=normalizeSshServiceHealth(result),identity={kind:'ssh',version:3,connectionId:data.connectionId,profileId:data.profileId,profileVersion:data.profileVersion,hostIdentity:health.hostIdentity,root:health.root,runtime:health.runtime,runtimeId:health.runtimeId};if(health.runtimeId!==bootstrap.payload.expected_runtime_id)fail('ssh_service_runtime_changed');
    if(reconciling){registrationFresh();await authenticated(attempt);fresh();registrationFresh();if(health.root!==saved.root||health.port!==saved.port||!equal(health.hostIdentity,saved.hostIdentity)||posix.normalize(health.root)!==health.root||health.root.endsWith('/')||health.runtime!==health.root+'/runtimes/'+health.runtimeId||health.runtimeManifestSha256!==bootstrap.payload.runtime_manifest_sha256||health.runtimeSourceScope!=='verified-cached-manifest')fail('ssh_service_identity_changed');}
    else if(saved&&(!sameHealth(health,saved)||healthMaintenance&&saved.runtimeManifestSha256!==undefined&&health.runtimeManifestSha256!==saved.runtimeManifestSha256))fail('ssh_service_identity_changed');attempt.health=health;phase(attempt,'checking_health');
    await attach(attempt,fresh);
-   attempt.connection=worker.connection;phase(attempt,'checking_tools');const tools=await checkedTools(attempt);fresh();if(reconciling||healthMaintenance){await authenticated(attempt);fresh();if(reconciling)registration.reconcileCurrent(profile,saved,attempt.health,tools);else registration.rememberVerifiedReuse(profile,saved,attempt.health,tools);}else registration?.remember(profile,attempt.health,tools);await remember(identity,attempt.health);fresh();attempt.status='connected';attempt.active=true;delete attempt.error;phase(attempt,'ready');return {...safe(),tools};
-  }catch(error){if(record!==attempt||intent!==serial)throw error;if(!attempt.observedActive&&(!attempt.dispatched||error?.serviceNotStarted===true)){attempt.dispatched=false;attempt.status='failed';attempt.active=false;if(error?.serviceNotStarted===true)phase(attempt,'preparing_local');attempt.error=safeSshServiceError(error?.message,attempt.phase);changed();}else unknown(attempt,error);if(['reuse','check'].includes(data.mode)&&!['ssh_service_registration_changed','ssh_service_maintenance_required'].includes(error?.message))maintenance(profile,attempt.error.code);return safe();}})();connecting={key,promise,attempt};try{return await promise;}finally{if(connecting?.promise===promise)connecting=null;}
+   attempt.connection=worker.connection;phase(attempt,'checking_tools');const tools=await checkedTools(attempt);fresh();
+   if(reconciling||healthMaintenance){await authenticated(attempt);fresh();}
+   checkRegistrationWrite();
+   if(reconciling)registration.reconcileCurrent(profile,saved,attempt.health,tools);
+   else if(healthMaintenance)registration.rememberVerifiedReuse(profile,saved,attempt.health,tools);
+   else registration?.remember(profile,attempt.health,tools);
+   await remember(identity,attempt.health);fresh();attempt.status='connected';attempt.active=true;delete attempt.error;phase(attempt,'ready');return {...safe(),tools};
+  }catch(error){
+   if(record!==attempt||intent!==serial)throw error;
+   if(!attempt.observedActive&&(!attempt.dispatched||error?.serviceNotStarted===true)){attempt.dispatched=false;attempt.status='failed';attempt.active=false;if(error?.serviceNotStarted===true)phase(attempt,'preparing_local');attempt.error=safeSshServiceError(error?.message,attempt.phase);changed();}else unknown(attempt,error);
+   if(['reuse','check'].includes(data.mode)&&!['ssh_service_registration_changed','ssh_service_maintenance_required'].includes(error?.message)){
+    try{if(registered&&equal(registered,registration.read(reference,registrationIdentityOptions)))maintenance(profile,attempt.error.code);}catch{/* A superseded profile cannot receive this failure. */}
+   }
+   return safe();
+  }})();connecting={key,promise,attempt};try{return await promise;}finally{if(connecting?.promise===promise)connecting=null;}
  }
  async function disconnect(data={}){if(!record){exact(data,[]);return safe();}const owned=exactAttempt(data);if(stopping)return stopping;serial++;revokeGrant();owned.status='disconnecting';phase(owned,'stopping');const finish=()=>{if(record!==owned)return safe();record=null;if(worker.connection===owned.connection)worker.close();changed();return {schemaVersion:2,status:'disconnected',workflowReady:false,serviceActive:false,operator:'human',revision,connectionId:owned.connectionId,attemptId:owned.attemptId,profileId:owned.profileId,profileVersion:owned.profileVersion};};
   const pending=(async()=>{if(!owned.dispatched||owned.active===false)return finish();if(connecting?.attempt===owned||!owned.serviceId){const v=await connections.cancelServiceStart({connectionId:owned.connectionId,requestId:owned.attemptId});if(record!==owned)return safe();if(!startupCancelled(owned,v))fail('service_stop_unknown');return finish();}const v=await connections.closeService({connectionId:owned.connectionId,serviceId:owned.serviceId});if(record!==owned)return safe();if(!viewMatches(owned,v)||v.serviceActive!==false||v.status!=='disconnected')fail('service_stop_unknown');return finish();})();stopping=pending;try{return await pending;}catch(error){unknown(owned,error?.message==='service_stop_unknown'?'stop_timeout':error);return safe();}finally{if(stopping===pending)stopping=null;}}
@@ -291,13 +328,13 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
   if(!detached&&(!['connected','unknown'].includes(owned.status)||!owned.connection||worker.connection!==owned.connection))fail('ssh_service_context_changed');
   const ticket=resource.capture(),owner=structuredClone(current()),generation=serial;
   const reference={profileId:owned.profileId,profileVersion:owned.profileVersion};
-  let connection=worker.connection;
+  let connection=worker.connection,saved;
   const sameTarget=()=>record===owned&&serial===generation&&equal(owner,current())&&selectedRecord(owned);
   const fresh=(expected=connection)=>{resource.assertCurrent(ticket);if(!sameTarget()||worker.connection!==expected)fail('ssh_service_context_changed');};
   if(detached)reattaching=owned;
   try{
-   const saved=detached&&registration?registration.read(reference).registration:undefined;
-   if(detached&&registration&&(!saved||!sameHealth(owned.health,saved)))fail('ssh_service_registration_changed');
+   saved=registration?.read(reference,registrationIdentityOptions);
+   if(saved&&(detached&&!saved.registration||saved.registration&&!registeredHealthMatches(owned.health,saved.registration)))fail('ssh_service_registration_changed');
    fresh();await authenticated(owned);fresh();
    const view=await connections.serviceState({connectionId:owned.connectionId,serviceId:owned.serviceId});fresh();
    if(!viewMatches(owned,view)||view.status!=='connected'||view.serviceActive!==true||(privateOnly||detached)&&view.channelKind!=='private')fail('ssh_service_unavailable');
@@ -308,7 +345,7 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
     health=verifiedLiveHealth(owned.health,await worker.request('GET','/api/health'));fresh();
    }
    const tools=await checkedTools(owned);fresh();
-   if(saved&&!equal(saved,registration.read(reference).registration))fail('ssh_service_registration_changed');
+   if(saved&&!equal(saved,registration.read(reference,registrationIdentityOptions)))fail('ssh_service_registration_changed');
    registration?.remember(profiles.read({id:owned.profileId,version:owned.profileVersion}),health,tools);
    const updated=owned.status!=='connected'||!equal(owned.health,health);
    owned.health=health;connection.health=structuredClone(health);owned.status='connected';delete owned.error;
@@ -319,7 +356,9 @@ function createConnectionService({worker,connections,profiles,resource,source,tr
    if(!sameTarget())return safe();
    if(error?.message==='ssh_control_timeout')throw error;
    unknown(owned,error);
-   if(error?.message!=='ssh_service_registration_changed')maintenance({id:owned.profileId,version:owned.profileVersion,kind:'ssh'},safe().error?.code);
+   if(error?.message!=='ssh_service_registration_changed'){
+    try{if(saved&&equal(saved,registration.read(reference,registrationIdentityOptions)))maintenance({id:owned.profileId,version:owned.profileVersion,kind:'ssh'},safe().error?.code);}catch{/* A superseded profile cannot receive this failure. */}
+   }
    return safe();
   }finally{if(detached&&reattaching===owned)reattaching=null;}
  }

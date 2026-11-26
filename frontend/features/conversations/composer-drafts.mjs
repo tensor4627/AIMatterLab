@@ -3,6 +3,8 @@ import {validAttachmentRef,attachmentLimits,attachmentsAfterReplacement} from '.
 const providers=new Set(['codex','kimi','qwen','deepseek','compatible']);
 
 const prefix='studio.composer.v1.';
+const validGuide=value=>value?.fromDraft===true&&typeof value.attachmentId==='string'&&
+ typeof value.name==='string'&&value.path===undefined&&typeof value.functionId==='string'&&/^[a-z][a-z0-9.-]{0,199}$/.test(value.functionId);
 
 export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
  const read=key=>{try{return storage().getItem(key);}catch{return null;}};
@@ -15,8 +17,8 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
   if(!id){const pointer=prefix+'new.'+provider;id=!fresh&&(newIds.get(provider)||read(pointer))||createId();newIds.set(provider,id);write(pointer,id);}
   const key=keyFor(provider,threadId?'thread':'new',id);
   if(entries.has(key))return entries.get(key);
-  let text='',files=[];try{const saved=JSON.parse(read(key));if(!threadId&&saved?.migratedTo)return load(provider,null,true);if(saved?.version===1&&typeof saved.text==='string'){text=saved.text;if(Array.isArray(saved.files))files=saved.files.filter(validAttachmentRef);}}catch{/* Ignore malformed or unavailable storage. */}
-  const entry={provider,threadId:threadId||null,blankId:threadId?null:id,key,text,files,revision:0,deleted:false,backups:new Set()};entries.set(key,entry);return entry;
+  let text='',files=[],guide;try{const saved=JSON.parse(read(key));if(!threadId&&saved?.migratedTo)return load(provider,null,true);if(saved?.version===1&&typeof saved.text==='string'){text=saved.text;if(Array.isArray(saved.files))files=saved.files.filter(validAttachmentRef);if(text.trim()&&validGuide(saved.guide))guide=saved.guide;}}catch{/* Ignore malformed or unavailable storage. */}
+  const entry={provider,threadId:threadId||null,blankId:threadId?null:id,key,text,files,guide,revision:0,deleted:false,backups:new Set()};entries.set(key,entry);return entry;
  }
  const selected=read('studio.conversation'),separator=selected?.indexOf(':')??-1;
  const selectedProvider=separator>0?selected.slice(0,separator):null;
@@ -24,35 +26,38 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
  let active=load(provider,providers.has(selectedProvider)&&separator<selected.length-1?selected.slice(separator+1):null);
  const listeners=new Set();
  const scope=()=>Object.freeze({provider:active.provider,threadId:active.threadId,...active.threadId?{}:{draftId:active.blankId}});
- let activeScope=scope(),publishedKey=active.key,publishedText=active.text;
+ let activeScope=scope(),publishedKey=active.key,publishedText=active.text,publishedGuide=active.guide;
  function subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}
  function publish(){
-  if(publishedKey===active.key&&publishedText===active.text)return;
+  if(publishedKey===active.key&&publishedText===active.text&&publishedGuide===active.guide)return;
   if(publishedKey!==active.key)activeScope=scope();
-  publishedKey=active.key;publishedText=active.text;
+  publishedKey=active.key;publishedText=active.text;publishedGuide=active.guide;
   for(const listener of listeners)listener();
  }
  function save(entry){
   if(entry.deleted)return false;
-  const data={version:1,text:entry.text,...entry.files.length?{files:entry.files}:{}};
+  const data={version:1,text:entry.text,...entry.files.length?{files:entry.files}:{},...entry.guide?{guide:entry.guide}:{}};
   const saved=write(entry.key,JSON.stringify(data));
   for(const key of entry.backups){if(saved&&remove(key))entry.backups.delete(key);else write(key,JSON.stringify({...data,migratedTo:entry.threadId}));}
   return saved;
  }
  function activate(provider,threadId=null,fresh=false){active=load(provider,threadId,fresh);write(prefix+'provider',provider);publish();return active.text;}
- function edit(text){active.text=text;active.revision++;save(active);publish();return text;}
+ function edit(text){active.text=text;if(!text.trim())active.guide=undefined;active.revision++;save(active);publish();return text;}
+ function setGuide(guide){active.guide=validGuide(guide)?guide:undefined;active.revision++;save(active);publish();}
  function seed(provider,threadId,text){
   const entry=load(provider,threadId);
   if(entry.deleted||entry.text||entry.revision)return false;
   entry.text=text;entry.revision++;save(entry);publish();return true;
  }
- function capture(){return {entry:active,key:active.key,revision:active.revision,text:active.text,files:[...active.files]};}
+ function capture(){return {entry:active,key:active.key,revision:active.revision,text:active.text,guide:active.guide,files:[...active.files]};}
  function acknowledge(snapshot){
   const entry=snapshot.entry;if(entry.deleted)return false;
   const match=entry.revision===snapshot.revision&&entry.text===snapshot.text;
   const sent=new Set((snapshot.files||[]).map(file=>file.id)),files=entry.files.filter(file=>!sent.has(file.id));
-  if(!match&&files.length===entry.files.length)return false;
-  entry.files=files;if(match){entry.text='';entry.revision++;}save(entry);publish();return match;
+  const guideSent=!!snapshot.guide&&entry.guide?.attachmentId===snapshot.guide.attachmentId;
+  if(!match&&!guideSent&&files.length===entry.files.length)return false;
+  entry.files=files;if(match)entry.text='';if(match||guideSent)entry.guide=undefined;
+  if(match||guideSent)entry.revision++;save(entry);publish();return match;
  }
  function appendFiles(entry,files){
   const merged=new Map(entry.files.map(file=>[file.id,file]));
@@ -67,10 +72,11 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
  }
  function addFiles(files){appendFiles(active,files);save(active);}
  function removeFile(id){active.files=active.files.filter(file=>file.id!==id);save(active);}
- function appendToDraft(provider,threadId,text,files=[],{requireStorage=false}={}){
-  const entry=load(provider,threadId),previous={text:entry.text,files:entry.files,revision:entry.revision};
+ function appendToDraft(provider,threadId,text,files=[],{requireStorage=false,guide}={}){
+  const entry=load(provider,threadId),previous={text:entry.text,files:entry.files,guide:entry.guide,revision:entry.revision};
   appendFiles(entry,files);
   if(text){entry.text=[entry.text,text].filter(Boolean).join('\n\n');entry.revision++;}
+  if(validGuide(guide))entry.guide=guide;
   if(!save(entry)&&requireStorage){Object.assign(entry,previous);throw Error('无法保存草稿，消息仍在队列中。');}
   publish();
   return active.text;
@@ -98,6 +104,7 @@ export function createComposerDrafts(storage,createId=()=>crypto.randomUUID()){
   if(active===entry)activate(provider,null,true);
   return active.text;
  }
- return {activate,edit,seed,capture,acknowledge,retain,rebind,rekey,discard,addFiles,addToSnapshot,removeFile,appendToDraft,subscribe,
+ return {activate,edit,setGuide,seed,capture,acknowledge,retain,rebind,rekey,discard,addFiles,addToSnapshot,removeFile,appendToDraft,subscribe,
+  guide:()=>active.guide,
   files:()=>active.files,text:()=>active.text,owner:()=>({provider:active.provider,threadId:active.threadId}),attachmentOwner:()=>activeScope};
 }

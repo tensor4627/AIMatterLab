@@ -34,6 +34,7 @@ const managedRecovery=new Map([
  ['managed_compute_project_observation_failed',['observation_unavailable','Read project authorization again on the original verified service.']],
  ['managed_compute_project_receipt_invalid',['observation_unavailable','Inspect the project authorization response from the original worker before taking another action.']],
  ['managed_compute_private_service_unavailable',['connection_unavailable','Check the current job-service receipt on the original resource. If the request can use a private terminal there, use its separately authorized terminal lease. Service unavailability alone does not establish an SSH authentication problem.']],
+ ['managed_compute_service_changed',['connection_unavailable','Verify the job service on the original resource and reacquire access: service there before repeating a read. Reconcile an unconfirmed write or submission by its original identity.']],
  ['managed_compute_project_grant_required',['access_required','Check the denied operation, current lease and project on the original resource. A planning change alone leaves existing authorization intact. Ask for a desktop permission change only when a specific required grant is missing or revoked.']],
  ['managed_schedule_task_delegation_required',['access_required','Check the user’s requested schedule purpose in this workflow and confirm any additional action with the user.']],
  ['shared_terminal_not_granted',['access_required','This conversation has no explicitly shared manual terminal. For a hosted SSH request, use its published resource and the matching service or terminal lease.']],
@@ -81,8 +82,16 @@ export function toolFailure(error,{dispatched=false,toolName}={}){
  if(dispatched&&readOnly)next_step=toolName==='run_compute_command'
   ?'The read did not return a confirmed receipt. Retry on the same resource with the same request_id for the identical read, or use a new request_id for a smaller read. Directory visibility still depends on the original SSH account.'
   :'Check the original authorized source and retry this read when available.';
- if(dispatched&&!readOnly&&original.run_id)next_step='Read the status of the exact original run before another write.';
- return {content:[{type:'text',text:JSON.stringify({status:dispatched&&!readOnly?'unknown':code==='tool_error'?'failed':'blocked',code,message,next_step,...original,operation_state:dispatched?(readOnly?'read_started':'unconfirmed'):'not_started',automatic_retry:false})}],isError:true};
+ if(error?.serviceFailure){
+  code='connection_unavailable';
+  next_step=dispatched&&!readOnly
+   ?'Verify and reacquire the job service on the original resource, then reconcile the original operation by its identity before another write. The original action is not replayed.'
+   :'Verify the job service on the original resource and reacquire access: service there before repeating the read.';
+ }else if(dispatched&&!readOnly&&original.run_id)next_step='Read the status of the exact original run before another write.';
+ return {content:[{type:'text',text:JSON.stringify({status:dispatched&&!readOnly?'unknown':code==='tool_error'?'failed':'blocked',code,message,next_step,...original,
+  ...error?.projectObservationStage?{project_access_step:error.projectObservationStage}:{},
+  ...error?.projectObservationHttpStatus?{project_access_http_status:error.projectObservationHttpStatus}:{},
+  ...error?.serviceFailure?{service_failure:error.serviceFailure}:{},operation_state:dispatched?(readOnly?'read_started':'unconfirmed'):'not_started',automatic_retry:false})}],isError:true};
 }
 
 export function toolValueResult(value){

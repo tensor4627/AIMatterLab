@@ -49,7 +49,7 @@ function view(record) {
   after: record.after,
   pause: record.pause,
   items: record.items.map(({id, text, skill, files, attachmentReview, newWorkflow, preparedTaskId, status}) => ({
-   id, text, ...(skill ? {skillName: skill.name} : {}), ...(files?.length ? {files} : {}),
+   id, text, ...(skill ? {skillName: skill.name} : {}), ...(skill?.functionId ? {skillFunctionId: skill.functionId} : {}), ...(files?.length ? {files} : {}),
    ...(attachmentReview ? {attachmentReview} : {}),
    status, steerable: !attachmentReview && !skill && !files?.length && !newWorkflow && !preparedTaskId
   }))

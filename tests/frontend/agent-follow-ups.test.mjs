@@ -147,6 +147,26 @@ test('busy Enter queues once, preserves new typing and follows exact terminal re
  }finally{h.unmount();}
 });
 
+test('a lost queue admission receipt cannot reuse its ID for a newly selected function',async()=>{
+ let first=true;
+ const h=await fixture({handle(phase){
+  if(phase==='admission'&&first){first=false;throw Error('Lost receipt after durable admission');}
+ }});
+ try{
+  const selection=(id,functionId)=>({attachmentId:id,name:id,functionId});
+  h.type('Same follow-up draft');
+  h.render({skill:selection('first-guide','cluster.connection-setup')});await h.flush();
+  h.click('agent-queue');await h.flush();
+  assert.equal(h.textarea().props.value,'Same follow-up draft');
+  h.render({skill:selection('replacement-guide','environment.probe')});await h.flush();
+  h.click('agent-queue');await h.flush();
+  const requests=h.calls.filter(call=>call.method==='agent.queue'&&call.data.action==='enqueue').map(call=>call.data.item);
+  assert.deepEqual(requests.map(item=>item.skill.functionId),['cluster.connection-setup','environment.probe']);
+  assert.notEqual(requests[0].id,requests[1].id);
+  assert.equal(h.textarea().props.value,'');
+ }finally{h.unmount();}
+});
+
 for(const provider of ['codex','deepseek','qwen','compatible']){
  test(provider+' steering targets the current turn and leaves further typing intact',async()=>{
   const gate=deferred();

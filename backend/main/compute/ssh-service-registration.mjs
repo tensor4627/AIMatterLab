@@ -1,6 +1,6 @@
 /** Persistent setup evidence, never a live channel or execution grant. */
 import {checkedSshLocations,mergeSshLocations} from '../../../contracts/compute/ssh-service-locations.mjs';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {posix} from 'node:path';
 const KIND='ssh-service-registration',SCHEMA=1;
@@ -28,9 +28,14 @@ function stored(value){
  const tools=value.tools?.status==='ready'&&Number.isSafeInteger(value.tools.count)&&value.tools.count>0?{status:'ready',count:value.tools.count}:value.tools?.status==='legacy_not_recorded'?{status:'legacy_not_recorded'}:null;
  if(!tools)fail('ssh_service_registration_invalid');
  if(value.maintenance!==undefined&&(!object(value.maintenance)||!maintenanceCodes.has(value.maintenance.code)))fail('ssh_service_registration_invalid');
- return {schemaVersion:SCHEMA,profileId:value.profileId,configuredAtProfileVersion:value.configuredAtProfileVersion,configurationSignature:value.configurationSignature,revision:value.revision,checkedAt:value.checkedAt,...health,tools,...Array.isArray(value.toolWarnings)&&value.toolWarnings.includes('tools_unavailable')?{toolWarnings:['tools_unavailable']}:{},...value.maintenance?{maintenance:{code:value.maintenance.code}}:{}};
+ if(value.identityGeneration!==undefined&&
+    (typeof value.identityGeneration!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.identityGeneration)))fail('ssh_service_registration_invalid');
+ return {schemaVersion:SCHEMA,profileId:value.profileId,configuredAtProfileVersion:value.configuredAtProfileVersion,configurationSignature:value.configurationSignature,identityGeneration:value.identityGeneration,revision:value.revision,checkedAt:value.checkedAt,...health,tools,...Array.isArray(value.toolWarnings)&&value.toolWarnings.includes('tools_unavailable')?{toolWarnings:['tools_unavailable']}:{},...value.maintenance?{maintenance:{code:value.maintenance.code}}:{}};
 }
-const publicRecord=value=>{const {configurationSignature,...record}=value;return structuredClone(record);};
+const publicRecord=(value,includeIdentityGeneration)=>{const {configurationSignature,identityGeneration,...record}=value;return structuredClone(includeIdentityGeneration?{...record,identityGeneration}:record);};
+export const sameRegistrationIdentity=(expected,actual)=>
+ ['profileId','root','runtime','runtimeId','runtimeManifestSha256','port','identityGeneration'].every(key=>expected[key]===actual[key])&&
+ equal(expected.hostIdentity,actual.hostIdentity);
 export function createSshServiceRegistration({catalog,profiles,legacyBinding=()=>null,now=Date.now}){
  if(!catalog?.get||!catalog?.put||!profiles?.read||!profiles?.list)fail('ssh_service_registration_invalid');
  function selected(request){if(!object(request)||Object.keys(request).some(key=>!['profileId','profileVersion'].includes(key))||!id(request.profileId)||!Number.isSafeInteger(request.profileVersion)||request.profileVersion<1)fail('ssh_service_registration_invalid');const profile=profiles.read({id:request.profileId,version:request.profileVersion});profileValid(profile);return profile;}
@@ -38,16 +43,16 @@ export function createSshServiceRegistration({catalog,profiles,legacyBinding=()=
   const legacy=legacyBinding();if(legacy?.kind!=='ssh'||legacy.version!==2||legacy.profileId!==profile.id||legacy.profileVersion!==profile.version||!Number.isFinite(legacy.checkedAt)||legacy.checkedAt<=0)return null;
   let health;try{health=checkedHealth(legacy.health||legacy);}catch{return null;}
   // A legacy descriptor without its actual port/health is not setup evidence.
-  const value={schemaVersion:SCHEMA,profileId:profile.id,configuredAtProfileVersion:profile.version,configurationSignature:signature(profile),revision:1,checkedAt:legacy.checkedAt,...health,tools:{status:'legacy_not_recorded'}};
+  const value={schemaVersion:SCHEMA,profileId:profile.id,configuredAtProfileVersion:profile.version,configurationSignature:signature(profile),identityGeneration:randomUUID(),revision:1,checkedAt:legacy.checkedAt,...health,tools:{status:'legacy_not_recorded'}};
   catalog.put(KIND,profile.id,value);return value;
  }
- function read(request){
+ function read(request,{includeIdentityGeneration=false}={}){
   const profile=selected(request);let raw=catalog.get(KIND,profile.id),registration;
   if(!raw)raw=migrate(profile);
   if(!raw)return {status:'unconfigured',profileId:profile.id,profileVersion:profile.version};
   try{registration=stored(raw);if(registration.profileId!==profile.id)throw Error();}catch{return {status:'maintenance_required',reason:'registration_invalid',profileId:profile.id,profileVersion:profile.version};}
   const changed=registration.configurationSignature!==signature(profile),maintenance=changed||!!registration.maintenance&&registration.maintenance.code!=='tools_unavailable';
-  return {status:maintenance?'maintenance_required':'configured',...maintenance?{reason:changed?'configuration_changed':registration.maintenance.code}:{},profileId:profile.id,profileVersion:profile.version,registration:publicRecord(registration)};
+  return {status:maintenance?'maintenance_required':'configured',...maintenance?{reason:changed?'configuration_changed':registration.maintenance.code}:{},profileId:profile.id,profileVersion:profile.version,registration:publicRecord(registration,includeIdentityGeneration)};
  }
  function remember(profile,health,tools){
   profileValid(profile);const current=profiles.read({id:profile.id,version:profile.version});if(signature(current)!==signature(profile))fail('ssh_service_registration_changed');
@@ -63,11 +68,19 @@ export function createSshServiceRegistration({catalog,profiles,legacyBinding=()=
   }
   const sameHost=previous?.profileId===profile.id&&previous.configurationSignature===signature(profile)&&previous.root===observed.root&&equal(previous.hostIdentity,observed.hostIdentity);
   if(sameHost){const locations=mergeSshLocations(previous.locations,observed.locations);if(locations)observed.locations=locations;}
-  const value=stored({schemaVersion:SCHEMA,profileId:profile.id,configuredAtProfileVersion:profile.version,configurationSignature:signature(profile),revision,checkedAt:now(),...observed,tools:tools.count?{status:'ready',count:tools.count}:{status:'legacy_not_recorded'},...tools.status==='warning'?{toolWarnings:['tools_unavailable']}:{}});
+  // A refresh updates the evidence revision. Identity transitions start a new
+  // generation so returning to a prior target cannot revive an old lease.
+  const sameGeneration=sameIdentity&&previous.runtimeManifestSha256===observed.runtimeManifestSha256;
+  const identityGeneration=sameGeneration?previous.identityGeneration:randomUUID();
+  const value=stored({schemaVersion:SCHEMA,profileId:profile.id,configuredAtProfileVersion:profile.version,
+   configurationSignature:signature(profile),identityGeneration,revision,checkedAt:now(),...observed,
+   tools:tools.count?{status:'ready',count:tools.count}:{status:'legacy_not_recorded'},
+   ...tools.status==='warning'?{toolWarnings:['tools_unavailable']}:{},
+  });
   catalog.put(KIND,profile.id,value);return read({profileId:profile.id,profileVersion:profile.version});
  }
- function validateReuse(profile,health){
-  profileValid(profile);const view=read({profileId:profile.id,profileVersion:profile.version});if(view.status!=='configured')fail(view.status==='unconfigured'?'ssh_service_registration_required':'ssh_service_maintenance_required');
+ function validateReuse(profile,health,options){
+  profileValid(profile);const view=read({profileId:profile.id,profileVersion:profile.version},options);if(view.status!=='configured')fail(view.status==='unconfigured'?'ssh_service_registration_required':'ssh_service_maintenance_required');
   if(health!==undefined){const actual=checkedHealth(health),expected=view.registration;if(['root','runtime','runtimeId','port'].some(key=>actual[key]!==expected[key])||expected.runtimeManifestSha256!==undefined&&actual.runtimeManifestSha256!==expected.runtimeManifestSha256||['hostname','uid','machineId'].some(key=>actual.hostIdentity[key]!==expected.hostIdentity[key]))fail('ssh_service_registration_identity_changed');}
   return view.registration;
  }
@@ -92,7 +105,13 @@ export function createSshServiceRegistration({catalog,profiles,legacyBinding=()=
  function markMaintenance(profile,code){
   profileValid(profile);profiles.read({id:profile.id,version:profile.version});
   if(!maintenanceCodes.has(code))return read({profileId:profile.id,profileVersion:profile.version});
-  const raw=catalog.get(KIND,profile.id);if(raw){let value;try{value=stored(raw);}catch{return read({profileId:profile.id,profileVersion:profile.version});}if(value.profileId!==profile.id)fail('ssh_service_registration_invalid');catalog.put(KIND,profile.id,{...value,revision:value.revision+1,maintenance:{code}});}
+  const raw=catalog.get(KIND,profile.id);
+  if(raw){
+   let value;try{value=stored(raw);}catch{return read({profileId:profile.id,profileVersion:profile.version});}
+   if(value.profileId!==profile.id)fail('ssh_service_registration_invalid');
+   const identityGeneration=code==='tools_unavailable'?value.identityGeneration:randomUUID();
+   catalog.put(KIND,profile.id,{...value,identityGeneration,revision:value.revision+1,maintenance:{code}});
+  }
   return read({profileId:profile.id,profileVersion:profile.version});
  }
  function list(){return profiles.list({kind:'ssh'}).map(profile=>read({profileId:profile.id,profileVersion:profile.version}));}

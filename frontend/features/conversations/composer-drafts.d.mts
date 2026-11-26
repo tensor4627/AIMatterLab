@@ -1,9 +1,13 @@
 import type {ChatAttachmentOwner,ChatAttachmentRef} from '../../../contracts/dto/chat-attachments';
-export interface ComposerDraftSnapshot {readonly entry:unknown;readonly key:string;readonly revision:number;readonly text:string;readonly files:ChatAttachmentRef[]}
+import type {AgentIntent} from './agent-types';
+type DraftGuide=NonNullable<AgentIntent['skill']>;
+export interface ComposerDraftSnapshot {readonly entry:unknown;readonly key:string;readonly revision:number;readonly text:string;readonly guide?:DraftGuide;readonly files:ChatAttachmentRef[]}
 
 export interface ComposerDraftStore {
  activate(provider:string,threadId?:string|null,fresh?:boolean):string;
  edit(text:string):string;
+ guide():DraftGuide|undefined;
+ setGuide(guide?:DraftGuide):void;
  seed(provider:string,threadId:string,text:string):boolean;
  capture():ComposerDraftSnapshot;
  acknowledge(snapshot:ComposerDraftSnapshot):boolean;
@@ -19,7 +23,7 @@ export interface ComposerDraftStore {
  addToSnapshot(snapshot:ComposerDraftSnapshot,files:readonly ChatAttachmentRef[]):boolean;
  addFiles(files:readonly ChatAttachmentRef[]):void;
  removeFile(id:string):void;
- appendToDraft(provider:string,threadId:string|null,text:string,files?:readonly ChatAttachmentRef[],options?:{requireStorage?:boolean}):string;
+ appendToDraft(provider:string,threadId:string|null,text:string,files?:readonly ChatAttachmentRef[],options?:{requireStorage?:boolean;guide?:DraftGuide}):string;
 }
 
 export function createComposerDrafts(storage:()=>Pick<Storage,'getItem'|'setItem'|'removeItem'>,createId?:()=>string):ComposerDraftStore;

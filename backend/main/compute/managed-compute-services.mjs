@@ -3,6 +3,7 @@ import {schedulerInspectionCapability} from '../../../contracts/compute/schedule
 import {isDeepStrictEqual as equal} from 'node:util';
 import {validTaskWorkerSource, stableSshWorkerBinding} from '../../../contracts/compute/task-worker-binding.mjs';
 import {normalizeSshServiceHealth} from './ssh-connection-service.mjs';
+import {sameRegistrationIdentity} from './ssh-service-registration.mjs';
 import {prepareSshServiceResourcesAsync} from './ssh-service-resources.mjs';
 import {sshSourceId,wslSourceId} from './worker-service-version.mjs';
 import {WorkerClient} from './worker.mjs';
@@ -37,18 +38,26 @@ export function createManagedComputeServices({connections,registration,source,tr
  }
  async function ssh(resource,profile,assertCurrent,{configure=false,repairMaintenance=false,upgrade,existingOnly=false}={}){
   const ref={connectionId:resource.connectionId},profileRef={profileId:profile.id,profileVersion:profile.version},requestBase={...ref,...profileRef};
-  const initial=configure?registration.read(profileRef):null;
+  const identityOptions={includeIdentityGeneration:true};
+  const initial=configure?registration.read(profileRef,identityOptions):null;
   const maintenance=initial?.status==='maintenance_required';
   const sameWorkspaceHost=!!(initial?.registration&&equal(initial.registration.hostIdentity,resource.workspaceRegistration?.hostIdentity));
   const repairableMaintenance=maintenance&&(initial.reason==='configuration_changed'||repairMaintenance&&(sameWorkspaceHost||initial.reason==='registration_invalid'&&!initial.registration));
   if(configure&&repairMaintenance&&maintenance&&!repairableMaintenance)fail('ssh_service_registration_identity_changed');
   const first=!!(configure&&(initial?.status==='unconfigured'||repairableMaintenance));
   const repair=first&&sameWorkspaceHost?initial.registration:null;
-  let saved=first?null:registration.validateReuse(profile);
+  const registered=health=>registration.validateReuse(profile,health,identityOptions);
+  let saved=first?null:registered();
+  let replacingRegistration=!!upgrade;
   const fresh=()=>{
    assertCurrent();
-   const actual=saved?registration.validateReuse(profile):registration.read(profileRef);
-   if(!equal(actual,saved||initial))fail('managed_compute_service_changed');
+   if(!saved){
+    if(!equal(registration.read(profileRef,identityOptions),initial))fail('managed_compute_service_changed');
+    return;
+   }
+   const actual=registered();
+   const same=replacingRegistration?equal(saved,actual):sameRegistrationIdentity(saved,actual);
+   if(!same)fail('managed_compute_service_changed');
   };
   const checkView=view=>{
    fresh();
@@ -84,6 +93,7 @@ export function createManagedComputeServices({connections,registration,source,tr
    view=checkView(await connections.serviceState(ref));
    if(!upgrade&&saved&&repairMaintenance&&view.serviceActive!==true&&equal(saved.hostIdentity,resource.workspaceRegistration?.hostIdentity)&&
       (openError||view.status==='failed'&&repairableFailureCodes.has(view.error?.code))){
+    replacingRegistration=true;
     bootstrap=await prepareBundled(saved.port);
     fresh();
     await connections.openService({...requestBase,requestId:uuid()},
@@ -115,10 +125,12 @@ export function createManagedComputeServices({connections,registration,source,tr
    const tools=toolReply.status===200&&toolReply.data?.id===requestId&&toolReply.data.result?.tools;
    const count=Array.isArray(tools)&&tools.length>0&&tools.every(tool=>typeof tool?.name==='string')?tools.length:0;
    registration.remember(profile,health,{status:count?'ready':'warning',count});
-   saved=registration.validateReuse(profile,health);
-  }else registration.validateReuse(profile,health);
+   saved=registered(health);
+   replacingRegistration=false;
+  }else registered(health);
   const binding=stableSshWorkerBinding({kind:'ssh',profileId:profile.id,profileVersion:profile.version,...health});
   async function verify(){
+   fresh();
    const observed=normalizeSshServiceHealth(unwrap(await forward('GET',healthPath,undefined,false,10000)));
    fresh();
    if(!stableHealth(health,observed))fail('managed_compute_service_changed');
@@ -176,36 +188,68 @@ export function originalBindingMatches(original,active){
 }
 
 export async function managedWorkerProject(scope,resource,service,assertCurrent){
- if(!service||!scope.projectId)return null;
+ const observation=await observeManagedWorkerProject(scope,resource,service,assertCurrent);
+ return observation.grant??null;
+}
+
+export async function observeManagedWorkerProject(scope,resource,service,assertCurrent){
+ if(!scope.projectId)return {access:'no_project'};
+ if(!service)return {access:'unobserved',reason:'service_unavailable'};
  assertCurrent();
- const query=async(method,target,data)=>{
-  const response=await service.forward(method,target,data,false,10000,assertCurrent);
-  assertCurrent();
-  if(response?.status===401||response?.status===403&&response.data?.error==='MCP credential is restricted to /mcp')
-   fail('managed_compute_project_authentication_failed');
-  if(response?.status!==200)fail('managed_compute_project_observation_failed');
-  const rows=response.data;
-  const valid=target==='/api/cluster/profile'?rows&&typeof rows==='object'&&!Array.isArray(rows):Array.isArray(rows);
-  if(!valid)fail('managed_compute_project_receipt_invalid');
-  return rows;
+ const validId=id=>typeof id==='string'&&id.length>0;
+ const invalid='managed_compute_project_receipt_invalid';
+ const query=async(stage,method,target,data,decode)=>{
+  let status;
+  try{
+   const response=await service.forward(method,target,data,false,10000,assertCurrent);
+   assertCurrent();
+   status=response?.status;
+   if(status===401||status===403&&response.data?.error==='MCP credential is restricted to /mcp')
+    fail('managed_compute_project_authentication_failed');
+   if(status!==200)fail('managed_compute_project_observation_failed');
+   const receipt=decode(response.data);
+   if(receipt===undefined)fail(invalid);
+   return receipt;
+  }catch(error){
+   throw Object.assign(Error(error?.message||'managed_compute_project_observation_failed',{cause:error}),{
+    projectObservationStage:stage,
+    projectObservationHttpStatus:Number.isInteger(status)&&status>=100&&status<=599?status:undefined,
+   });
+  }
  };
- const projects=await query('GET','/api/projects');
- const project=Array.isArray(projects)&&projects.find(row=>row?.id===scope.projectId);
- if(!project?.policy)return null;
+ const catalog=rows=>Array.isArray(rows)&&rows.every(row=>validId(row?.id))?rows:undefined;
+ const targetsOf=project=>{
+  const policy=project.policy;
+  if(!policy||typeof policy!=='object'||Array.isArray(policy))return;
+  const {clusters=[],environments}=policy;
+  const targets=resource.kind==='ssh'?clusters:environments;
+  if(Array.isArray(targets)&&targets.every(validId)&&(resource.kind!=='ssh'||targets.length<=128))return targets;
+ };
+ const project=await query('project_catalog','GET','/api/projects',undefined,rows=>{
+  if(!catalog(rows))return;
+  const matches=rows.filter(row=>row.id===scope.projectId);
+  if(!matches.length)return {access:'project_missing'};
+  if(matches.length!==1)return;
+  if(matches[0].authoring_only===true)return {access:'authoring_only'};
+  const targets=targetsOf(matches[0]);
+  if(targets)return {targets};
+ });
+ if(project.access)return project;
+ const {targets}=project;
+ if(!targets.length)return {access:'not_granted'};
  if(resource.kind!=='ssh'){
-  if(!Array.isArray(project.policy.environments)||!project.policy.environments.length)return null;
-  const registered=await query('GET','/api/environments');
-  const environmentIds=Array.isArray(registered)?registered.filter(row=>project.policy.environments.includes(row?.id)).map(row=>row.id):[];
-  return environmentIds.length?{environmentIds,clusterIds:[]}:null;
+  const registered=await query('environment_catalog','GET','/api/environments',undefined,catalog);
+  const environmentIds=registered.filter(row=>targets.includes(row.id)).map(row=>row.id);
+  return environmentIds.length?{access:'authorized',grant:{environmentIds,clusterIds:[]}}:{access:'not_granted'};
  }
- const allowed=project.policy.clusters;
- if(!Array.isArray(allowed)||!allowed.length||allowed.length>128)return null;
- const rows=await query('GET','/api/clusters'),clusterIds=[];
+ const rows=await query('cluster_catalog','GET','/api/clusters',undefined,catalog),clusterIds=[];
  const host=service.binding.hostIdentity,want={root:service.binding.root,hostname:host.hostname,uid:host.uid,machineId:host.machineId};
- for(const cluster of Array.isArray(rows)?rows:[]){
-  if(cluster?.transport_kind!=='ssh-service-local'||!allowed.includes(cluster.id))continue;
-  const detail=await query('POST','/api/cluster/profile',{cluster_id:cluster.id});
-  if(detail?.id===cluster.id&&detail.version===cluster.version&&detail.transport_kind==='ssh-service-local'&&equal(detail.service_binding,want))clusterIds.push(cluster.id);
+ for(const cluster of rows){
+  if(cluster.transport_kind!=='ssh-service-local'||!targets.includes(cluster.id))continue;
+  const detail=await query('cluster_profile','POST','/api/cluster/profile',{cluster_id:cluster.id},row=>
+   row&&typeof row==='object'&&!Array.isArray(row)&&row.id===cluster.id&&row.version===cluster.version&&
+   row.transport_kind===cluster.transport_kind&&row.service_binding&&typeof row.service_binding==='object'&&!Array.isArray(row.service_binding)?row:undefined);
+  if(equal(detail.service_binding,want))clusterIds.push(cluster.id);
  }
- return clusterIds.length?{environmentIds:[],clusterIds}:null;
+ return clusterIds.length?{access:'authorized',grant:{environmentIds:[],clusterIds}}:{access:'not_granted'};
 }

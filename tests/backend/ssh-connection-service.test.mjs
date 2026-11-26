@@ -287,3 +287,119 @@ test('a registration changed during detached recovery retains its newer state',a
  assert.equal(f.registration.read({profileId:'profile-A',profileVersion:1}).reason,'namespace_unsafe');
  assert.equal(f.calls.filter(c=>c.open).length,1);
 });
+
+test('selecting a hosted service tolerates observation refresh but rejects registration replacement or selection loss',async t=>{
+ const reference={profileId:'profile-A',profileVersion:1};
+ for(const change of ['refresh','replacement','replace-and-restore','selection-loss']){
+  await t.test(change,async t=>{
+   const f=fixture(t),profile=f.profile('A'),health=f.health('A'),tools={status:'ready',count:1};
+   f.connections.privateServiceRequest=f.connections.serviceRequest;
+   f.registration.remember(profile,health,tools);
+   f.channels.set('A',{...reference,connectionId:'A',attemptId:'hosted',serviceId:'hosted-service',
+    status:'connected',serviceActive:true,channelKind:'private',service:health});
+   let selected=0,authorized=true;
+   const assertCurrent=()=>{if(!authorized)throw Error('ssh_service_context_changed');};
+   const gate=f.delayHealth();
+   const pending=f.service.useHosted({...reference,connectionId:'A',requestId:'select-hosted',mode:'reuse'},
+    {assertCurrent,commit:prepare=>{assertCurrent();prepare();selected++;}});
+   await gate.started;
+   if(change==='refresh'){
+    const previous=f.registration.read(reference).registration;
+    f.registration.rememberVerifiedReuse(profile,previous,health,tools);
+   }else if(change==='selection-loss'){
+    authorized=false;
+   }else{
+    f.registration.remember(profile,{...health,port:25001},tools);
+    if(change==='replace-and-restore')f.registration.remember(profile,health,tools);
+   }
+   gate.release();
+   const receipt=await pending;
+   assert.equal(receipt.workflowReady,change==='refresh');
+   assert.equal(selected,change==='refresh'?1:0);
+   assert.equal(!!f.worker.connection,change==='refresh');
+   assert.equal(f.service.hasCurrentGrant('codex'),false);
+   assert.equal(f.calls.some(call=>call.open||call.close),false);
+  });
+ }
+});
+
+test('an attached worker health check cannot overwrite concurrent maintenance or a replacement registration',async t=>{
+ for(const change of ['maintenance','replacement']){
+  await t.test(change,async t=>{
+   const f=fixture(t),original=await f.connect(),profile=f.profile('A');
+   const reference={profileId:profile.id,profileVersion:profile.version};
+   f.grant();
+   const gate=f.delayHealth();
+   const pending=f.service.check({connectionId:'A',attemptId:original.attemptId});
+   await gate.started;
+   const saved=change==='maintenance'?f.registration.markMaintenance(profile,'namespace_unsafe'):
+    f.registration.remember(profile,{...f.health('A'),port:25001},{status:'ready',count:1});
+   gate.release();
+   const receipt=await pending;
+   assert.equal(receipt.workflowReady,false);
+   assert.deepEqual(f.registration.read(reference),saved);
+   assert.equal(f.service.hasCurrentGrant('codex'),false);
+   assert.equal(f.bases.get('A').authentication,'verified');
+   assert.equal(f.calls.some(call=>call.close),false);
+  });
+ }
+});
+
+test('binding the already selected hosted service revalidates the registration after the tool probe',async t=>{
+ for(const change of ['refresh','replacement']){
+  await t.test(change,async t=>{
+   const f=fixture(t),profile=f.profile('A'),health=f.health('A'),tools={status:'ready',count:1};
+   const reference={profileId:profile.id,profileVersion:profile.version};
+   f.registration.remember(profile,health,tools);
+   f.channels.set('A',{...reference,connectionId:'A',attemptId:'hosted',serviceId:'hosted-service',
+    status:'connected',serviceActive:true,channelKind:'private',service:health});
+   const probe=f.worker.probeTools.bind(f.worker);
+   f.worker.probeTools=async()=>{
+    const result=await probe();
+    f.registration.remember(profile,change==='refresh'?health:{...health,port:25001},tools);
+    return result;
+   };
+   const result=await f.service.useHosted({...reference,connectionId:'A',requestId:'attach-selected',mode:'reuse'});
+   assert.equal(result.workflowReady,change==='refresh');
+   assert.equal(f.registration.read(reference).registration.port,change==='refresh'?25000:25001);
+   assert.equal(f.service.hasCurrentGrant('codex'),false);
+   assert.equal(f.calls.some(call=>call.open||call.close),false);
+  });
+ }
+});
+
+test('starting a registered cached worker does not overwrite a superseding registration',async t=>{
+ const f=fixture(t),profile=f.profile('A'),health=f.health('A'),tools={status:'ready',count:1};
+ const reference={profileId:profile.id,profileVersion:profile.version};
+ f.registration.remember(profile,health,tools);
+ f.channels.set('A',{...reference,connectionId:'A',status:'idle',serviceActive:false});
+ let superseding;
+ const probe=f.worker.probeTools.bind(f.worker);
+ f.worker.probeTools=async()=>{
+  const result=await probe();
+  superseding=f.registration.remember(profile,{...health,port:25001},tools);
+  return result;
+ };
+ const receipt=await f.service.connectForConversations({...reference,connectionId:'A',requestId:'cache-reuse',mode:'reuse'});
+ assert.equal(receipt.workflowReady,false);
+ assert(superseding);
+ assert.deepEqual(f.registration.read(reference),superseding);
+ assert.equal(f.calls.filter(call=>call.open).length,1);
+ assert.equal(f.calls.some(call=>call.close),false);
+});
+
+test('a failed cached start cannot mark a superseding registration as requiring maintenance',async t=>{
+ const f=fixture(t),profile=f.profile('A'),health=f.health('A'),tools={status:'ready',count:1};
+ const reference={profileId:profile.id,profileVersion:profile.version};
+ f.registration.remember(profile,health,tools);
+ f.channels.set('A',{...reference,connectionId:'A',status:'idle',serviceActive:false});
+ let replacement;
+ f.connections.openService=async()=>{
+  replacement=f.registration.remember(profile,{...health,port:25001},tools);
+  throw Error('worker_health_invalid');
+ };
+ const receipt=await f.service.connectForConversations({...reference,connectionId:'A',requestId:'cache-failure',mode:'reuse'});
+ assert.equal(receipt.workflowReady,false);
+ assert(replacement);
+ assert.deepEqual(f.registration.read(reference),replacement);
+});

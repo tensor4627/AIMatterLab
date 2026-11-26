@@ -20,7 +20,7 @@ const prepareFields={
 };
 
 const definitions=[
- tool('inspect_compute_service','Inspect the exact resource leased by this conversation, including in ordinary chat. Use probe_scheduler:true for a requested bounded observation of visible queues. Worker project grants are separate from host login and queue inspection.',schema({resource_id:id,probe_scheduler:{type:'boolean'}},['resource_id']),true),
+ tool('inspect_compute_service','Inspect the exact resource leased by this conversation, including in ordinary chat. Use probe_scheduler:true for a requested bounded observation of visible queues. Read project_access for the scoped project_id. For unobserved, use project_access_reason and any project_access_step or project_access_http_status to report why verification failed. Service readiness and queue observations are independent of project authorization. The target ID arrays list only matching project grants. Empty arrays do not describe the service inventory.',schema({resource_id:id,probe_scheduler:{type:'boolean'}},['resource_id']),true),
  tool('prepare_compute_run','Prepare an independent job in ordinary chat or a workflow draft on the acquired service. Use an authorized project and target. Standalone input paths are on that worker: paths relative to the project inputs directory or absolute paths under its granted roots.',schema({
   resource_id:id,kind:{enum:['run','cluster-run']},
   spec:schema({...prepareFields,environment_id:id,gpu:finiteInteger(0,65535),cluster_id:id,resources:schema({queue:id,queue_target_id:id,account:id,qos:id,cpus:finiteInteger(1,2147483647),gpus:finiteInteger(0,2147483647),memory_mb:finiteInteger(1,2147483647)},[])},['engine','max_seconds','inputs','idempotency_key'])

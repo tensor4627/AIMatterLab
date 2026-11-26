@@ -28,6 +28,7 @@ export interface QueuedMessage {
  id: string;
  text: string;
  skillName?: string;
+ skillFunctionId?: string;
  files?: ChatAttachmentRef[];
  attachmentReview?: boolean;
  status: 'queued'|'preparing'|'submitting'|'unconfirmed';

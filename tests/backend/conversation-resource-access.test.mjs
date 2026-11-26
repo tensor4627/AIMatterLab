@@ -20,9 +20,10 @@ function fixture(t,{serviceReady=true,selectionCatalog}={}) {
    async forward(method,target,body,mcp,timeout,check){
     check?.();calls.push(target);
     const workerProject=control.workerProjects?.[resource.profileId];
-    if(target==='/api/projects')return {status:200,data:workerProject?[{id:workerProject,policy:{clusters:[cluster.id]}}]:[]};
-    if(target==='/api/clusters')return {status:200,data:[cluster]};
-    if(target==='/api/cluster/profile')return {status:200,data:{...cluster,service_binding:{root:binding.root,...binding.hostIdentity}}};
+    if(target==='/api/projects')return control.projectCatalog?await control.projectCatalog(cluster):
+     {status:200,data:workerProject?[{id:workerProject,policy:{clusters:[cluster.id]}}]:[]};
+    if(target==='/api/clusters')return control.clusterCatalog??{status:200,data:[{id:'ordinary-ssh-cluster',version:1},cluster]};
+    if(target==='/api/cluster/profile')return control.clusterProfile??{status:200,data:{...cluster,service_binding:{root:binding.root,...binding.hostIdentity}}};
     assert.deepEqual([method,target,body,mcp,timeout],['POST','/api/ssh-service/inspect-scheduler',{},false,15000]);
     return {status:200,data:{status:'observed',observed_at:100,automatic_retry:false,observations:[
      {scheduler:'slurm',status:'observed',queues:[{name:'fixture-only',default:true,availability:'up',node_count:1,node_state:'idle',gres:'gpu:1'}]},
@@ -78,7 +79,8 @@ test('DeepSeek can inspect queues on the only hosted SSH target in an ordinary c
   assert.equal(lease.status,'acquired');assert(lease.terminal.sessionId);
   const probe=await f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},scope);
   assert.equal(probe.terminal_available,true);
-  assert.equal(probe.project_access,projectId?'not_granted':'no_project');
+  assert.equal(probe.project_access,projectId?'project_missing':'no_project');
+  assert.equal(probe.project_id,projectId??undefined);
   assert.equal(probe.scheduler.observations[0].queues[0].node_state,'idle');
   assert.deepEqual(probe.cluster_ids,[]);
   assert.equal((await f.gateway.call('acquire_compute_resource',{resource_id,alias:'示例甲'},scope)).reused,true);
@@ -86,6 +88,43 @@ test('DeepSeek can inspect queues on the only hosted SSH target in an ordinary c
  }
  assert.equal(f.calls.filter(call=>call==='open').length,2);
  assert.equal(f.calls.filter(call=>call==='/api/ssh-service/inspect-scheduler').length,2);
+});
+
+test('inspect compute service reports project evidence separately from service and queue readiness',async t=>{
+ const f=fixture(t),resource_id=await f.host('a','示例甲'),projectId='desktop-project';
+ const scope={...f.scope,projectId};
+ f.speak('检查示例甲的队列和项目授权',scope);
+ await f.gateway.call('acquire_compute_resource',{resource_id,access:'service'},scope);
+ const catalog=(policy,authoring_only=false)=>({status:200,data:[{id:projectId,authoring_only,policy:{clusters:policy}}]});
+ const cases=[
+  {reply:{status:401,data:{error:'private credential detail'}},access:'unobserved',reason:'authentication_failed',step:'project_catalog',httpStatus:401},
+  {reply:{status:403},access:'unobserved',reason:'request_failed',step:'project_catalog',httpStatus:403},
+  {reply:{status:503},access:'unobserved',reason:'request_failed',step:'project_catalog',httpStatus:503},
+  {reply:{status:200,data:{}},access:'unobserved',reason:'invalid_receipt',step:'project_catalog',httpStatus:200},
+  {reply:Error('private forward detail'),access:'unobserved',reason:'request_failed',step:'project_catalog'},
+  {reply:{status:200,data:[{id:'different-project',policy:{clusters:['scheduler-a']}}]},access:'project_missing'},
+  {reply:catalog(['scheduler-a'],true),access:'authoring_only'},
+  {reply:catalog(['different-cluster']),access:'not_granted'},
+  {reply:catalog(['scheduler-a']),clusterCatalog:{status:503},access:'unobserved',reason:'request_failed',step:'cluster_catalog',httpStatus:503},
+  {reply:catalog(['scheduler-a']),clusterProfile:{status:404,data:{error:'private cluster detail'}},access:'unobserved',reason:'request_failed',step:'cluster_profile',httpStatus:404},
+  {reply:catalog(['scheduler-a']),access:'authorized'},
+ ];
+ for(const {reply,clusterCatalog,clusterProfile,access,reason,step,httpStatus} of cases){
+  f.control.projectCatalog=()=>{if(reply instanceof Error)throw reply;return reply;};
+  Object.assign(f.control,{clusterCatalog,clusterProfile});
+  const probe=await f.gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},scope);
+  assert.equal(probe.service_status,'ready');
+  assert.equal(probe.project_id,projectId);
+  assert.equal(probe.project_access,access);
+  assert.equal(probe.project_access_reason,reason);
+  assert.equal(probe.project_access_step,step);
+  assert.equal(probe.project_access_http_status,httpStatus);
+  assert.deepEqual(probe.cluster_ids,access==='authorized'?['scheduler-a']:[]);
+  assert.equal(probe.scheduler.observations[0].queues[0].node_state,'idle');
+  assert.doesNotMatch(JSON.stringify(probe),/private/);
+ }
+ f.control.projectCatalog=()=>catalog(['scheduler-a'],true);
+ await assert.rejects(f.manager.resolveService(scope,resource_id),/project_grant_required/);
 });
 
 test('checking a compute environment offers its sole candidate and a confirmed selection permits one terminal acquisition',async t=>{

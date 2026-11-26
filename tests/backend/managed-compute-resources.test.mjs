@@ -12,6 +12,8 @@ import {managedProjectAccess} from '../../backend/main/compute/managed-project-a
 import {taskForRecordIndex} from '../../backend/main/compute/worker-service-version.mjs';
 import {assertRendererWorkerRoute} from '../../contracts/transport-policy.mjs';
 import {developerComputeAccess} from '../../backend/main/compute/developer-compute-access.mjs';
+import {toolFailure} from '../../agent/tools/tool-failure.mjs';
+import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
 
 const profile=(id,name)=>({id,kind:'ssh',version:1,name,host:'private-'+id+'.invalid',username:'private-user',port:22,
  ssh_client:'/usr/bin/ssh',distribution:'Private WSL',mode:'interactive',identity_file:'/secret/key',proxy_jump:[],via:[]});
@@ -146,7 +148,7 @@ test('adding a workflow retains the original chat channel and inspection without
  f.turn(ordinary,'检查材料中心的队列');
  const original=await manager.acquire(ordinary,{resourceId:'ssh:A'});
  await manager.acquire(ordinary,{resourceId:'ssh:A',access:'service'});
- assert.equal((await manager.inspectService(ordinary,'ssh:A')).project_access,'not_granted');
+ assert.equal((await manager.inspectService(ordinary,'ssh:A')).project_access,'project_missing');
  assert.deepEqual((await manager.callTerminalTool('list_compute_terminals',{},ordinary)).sessions,[original.terminal]);
  const planning={...ordinary,taskId:'the-workflow'};
  f.turn(planning,'继续制定流程，先不提交计算');
@@ -154,7 +156,7 @@ test('adding a workflow retains the original chat channel and inspection without
  assert.deepEqual((await manager.callTerminalTool('list_compute_terminals',{},planning)).sessions,[original.terminal]);
  const write={session_id:original.terminal.sessionId,request_id:'fixture-write',action:'type',data:'pwd'};
  assert.equal((await manager.callTerminalTool('write_compute_terminal',write,planning)).accepted,true);
- assert.equal((await manager.inspectService(planning,'ssh:A')).project_access,'not_granted');
+ assert.equal((await manager.inspectService(planning,'ssh:A')).project_access,'project_missing');
  await assert.rejects(manager.resolveService(planning,'ssh:A'),/project_grant_required/);
  assert.equal(f.calls.filter(({op})=>op==='open').length,1);
  const other={...planning,threadId:'other-chat'};
@@ -508,6 +510,181 @@ test('a private service control timeout keeps the original source for the next v
  await manager.sweep({idleMs:60000});
  assert.equal(manager.listSources().length,0);
  assert.equal(closed,1);
+});
+
+test('failed job-service health retains its first public receipt alongside a working command lease',async t=>{
+ let verifyError,attachError,verifyGate,attached=0,commands=0;
+ const services={ssh:async()=>{
+  if(attachError)throw Error(attachError);
+  const generation='channel-'+(++attached);
+  return {id:'original',generation,async verify(){if(verifyGate)await verifyGate.promise;if(verifyError)throw Error(verifyError);},
+   async forward(){return {status:200,data:[]};}};
+ }};
+ const f=fixture(t,{services,authorizeTerminal:()=>true,resourceWorkspace:{assertHandoff:async()=>({}),publicWorkspace:value=>value},
+  terminalAuthorization:{async execute({assertCurrent,verifyConnection}){
+   await verifyConnection();assertCurrent();commands++;return {exit_code:0};
+  }}});
+ const {manager}=f,scope={...f.owner,taskId:null,projectId:null},resource_id='ssh:A';
+ const args={resourceId:resource_id};
+ await f.publish('A');
+ await manager.refreshService({connectionId:'conn-A'});
+ f.turn(scope,'检查材料中心的作业服务');
+ await manager.acquire(scope,{...args,access:'service'});
+ await manager.acquire(scope,{...args,access:'command'});
+
+ const observedAt=35000;
+ f.time(observedAt);verifyError='worker_health_invalid';
+ await manager.sweep();
+ const diagnosis={channel:'job_service',observed_at:new Date(observedAt).toISOString(),step:'health_check',reason:'worker_health_invalid'};
+ const [listed]=(await manager.list(scope)).resources;
+ assert.equal(listed.serviceStatus,'unavailable');
+ assert.equal(listed.commandAvailable,true);
+ assert.equal(listed.acquired,true);
+ assert.deepEqual(listed.serviceFailure,diagnosis);
+ assert.equal((await manager.acquire(scope,{...args,access:'command'})).reused,true);
+ const inspected=await manager.inspectService(scope,resource_id,{probeScheduler:true});
+ assert.equal(inspected.command_available,true);
+ assert.equal(inspected.terminal_available,false);
+ assert.equal(inspected.scheduler.reason,'service_unavailable');
+ assert.deepEqual(inspected.service_failure,diagnosis);
+ assert.match(inspected.next_step,/original resource.*reacquire/);
+ assert.equal((await manager.callTool('run_compute_command',{resource_id,request_id:'read-one',command:'pwd'},scope)).exit_code,0);
+ assert.equal(commands,1);
+
+ async function acquisitionFailure(){
+  try{await manager.acquire(scope,{...args,access:'service'});}
+  catch(error){return error;}
+  assert.fail('Expected job-service acquisition to fail');
+ }
+ attachError='raw remote error with private output';
+ f.time(40000);
+ assert.equal(await manager.refreshService({connectionId:'conn-A',existingOnly:true}),null);
+ const failure=await acquisitionFailure();
+ const blocked=JSON.parse(toolFailure(failure,{toolName:'acquire_compute_resource'}).content[0].text);
+ assert.equal(blocked.code,'connection_unavailable');
+ assert.equal(blocked.operation_state,'not_started');
+ assert.deepEqual(blocked.service_failure,diagnosis);
+ assert.doesNotMatch(JSON.stringify(blocked),/private output|correct the request/);
+ const unknown=JSON.parse(toolFailure(failure,{dispatched:true,toolName:'submit_compute_run'}).content[0].text);
+ assert.equal(unknown.operation_state,'unconfirmed');
+ assert.equal(unknown.automatic_retry,false);
+ assert.match(unknown.next_step,/reconcile the original operation/);
+ assert.equal(attached,1);
+
+ verifyError=null;attachError=null;
+ await manager.refreshService({connectionId:'conn-A',existingOnly:true});
+ const changed=JSON.parse(toolFailure(Error('managed_compute_service_changed')).content[0].text);
+ assert.equal(changed.code,'connection_unavailable');
+ assert.match(changed.next_step,/original resource.*reacquire/);
+ assert.equal((await manager.acquire(scope,{...args,access:'service'})).reused,false);
+ assert.equal((await manager.inspectService(scope,resource_id)).service_failure,undefined);
+
+ verifyError='raw remote error with private output';
+ await manager.sweep();
+ const unclassified=(await manager.inspectService(scope,resource_id)).service_failure;
+ assert.equal(unclassified.reason,'service_failure_unclassified');
+ assert.doesNotMatch(JSON.stringify(unclassified),/private output/);
+
+ verifyError=null;
+ await manager.refreshService({connectionId:'conn-A',existingOnly:true});
+ verifyGate=deferred();
+ const refresh=manager.refreshService({connectionId:'conn-A',existingOnly:true});
+ const attachments=attached;
+ await manager.revokeConnection({connectionId:'conn-A'});
+ verifyGate.resolve();
+ assert.equal(await refresh,null);
+ assert.equal(attached,attachments);
+});
+
+test('independent command authorization keeps inspection available when the retained worker grant cannot be verified',async t=>{
+ const saved=new Map(),catalog={get:(_,id)=>saved.get(id),put:(_,id,row)=>saved.set(id,structuredClone(row)),remove:(_,id)=>saved.delete(id)};
+ let desktop=false,observation,projectReads=0,queueReads=0;
+ const binding={root:'/fixture',hostIdentity:{hostname:'fixture',uid:1000,machineId:'fixture'}};
+ const cluster={id:'scheduler',version:1,transport_kind:'ssh-service-local'};
+ const service={id:'worker',generation:'generation',binding,schedulerInspection:true,verify:async()=>{},
+  async forward(_method,target){
+   if(target==='/api/projects'){
+    projectReads++;
+    if(observation instanceof Error)throw observation;
+    return observation??{status:200,data:[{id:'project',policy:{clusters:['scheduler']}}]};
+   }
+   if(target==='/api/clusters')return {status:200,data:[cluster]};
+   if(target==='/api/cluster/profile')return {status:200,data:{...cluster,service_binding:{root:binding.root,...binding.hostIdentity}}};
+   assert.equal(target,'/api/ssh-service/inspect-scheduler');
+   queueReads++;
+   return {status:200,data:{status:'observed',observed_at:100,automatic_retry:false,observations:[
+    {scheduler:'slurm',status:'observed',queues:[]},{scheduler:'lsf',status:'not_found',queues:[]},
+   ]}};
+  }};
+ const f=fixture(t,{services:{ssh:async()=>service},selectionCatalog:catalog,authorizeTerminal:()=>desktop,
+  resourceWorkspace:{assertHandoff:async()=>({}),publicWorkspace:value=>value},
+  terminalAuthorization:{execute:async()=>({exit_code:0})}});
+ const {manager,owner}=f,resource_id='ssh:A';
+ const gateway=createManagedComputeTools({resources:manager,assertWorkflow:()=>({id:owner.taskId}),authorizeTask:()=>{}});
+ await f.publish('A');
+ await manager.refreshService({connectionId:'conn-A'});
+ f.turn(owner,'检查材料中心的作业服务');
+ await gateway.call('acquire_compute_resource',{resource_id,access:'service'},owner);
+
+ observation=Error('private remote path and credential');
+ await assert.rejects(gateway.call('acquire_compute_resource',{resource_id,access:'service'},owner),error=>{
+  const failure=JSON.parse(toolFailure(error).content[0].text);
+  assert.equal(failure.code,'observation_unavailable');
+  assert.equal(failure.project_access_step,'project_catalog');
+  assert.equal(failure.project_access_http_status,undefined);
+  assert.equal(failure.operation_state,'not_started');
+  assert.doesNotMatch(JSON.stringify(failure),/private remote/);
+  return true;
+ });
+ desktop=true;
+ await gateway.call('acquire_compute_resource',{resource_id,access:'command'},owner);
+ observation={status:503};
+ const before=projectReads;
+ const inspect=()=>gateway.call('inspect_compute_service',{resource_id,probe_scheduler:true},owner);
+ const receipt=await inspect();
+ assert.equal(receipt.project_access,'unobserved');
+ assert.equal(receipt.project_access_http_status,503);
+ assert.equal(receipt.command_available,true);
+ assert.equal(receipt.scheduler.status,'observed');
+ assert.equal(projectReads,before+1);
+ assert.equal(queueReads,1);
+ await assert.rejects(manager.resolveService(owner,resource_id),error=>error.projectObservationHttpStatus===503);
+ desktop='denied';
+ await assert.rejects(inspect(),/managed_compute_project_observation_failed/);
+ assert.equal(queueReads,1);
+});
+
+test('inspection distinguishes project HTTP failures from job-service identity loss while retaining the command lease',async t=>{
+ let identityChanged=false;
+ const services={ssh:async()=>({id:'original',generation:'channel',async verify(){},async forward(_method,target){
+  assert.equal(target,'/api/projects');
+  if(identityChanged)throw Error('ssh_service_registration_identity_changed');
+  return {status:503};
+ }})};
+ const f=fixture(t,{services,authorizeTerminal:()=>true,resourceWorkspace:{assertHandoff:async()=>({}),publicWorkspace:value=>value},
+  terminalAuthorization:{execute:async()=>({exit_code:0})}});
+ const {manager}=f,scope={...f.owner,taskId:null},resourceId='ssh:A';
+ await f.publish('A');
+ await manager.refreshService({connectionId:'conn-A'});
+ f.turn(scope,'检查材料中心的作业服务');
+ await manager.acquire(scope,{resourceId,access:'command'});
+ await manager.acquire(scope,{resourceId,access:'service'});
+ const projectFailure=await manager.inspectService(scope,resourceId);
+ assert.equal(projectFailure.project_access,'unobserved');
+ assert.equal(projectFailure.project_access_reason,'request_failed');
+ assert.equal(projectFailure.service_status,'ready');
+ assert.equal(projectFailure.service_failure,undefined);
+
+ identityChanged=true;
+ const unavailable=await manager.inspectService(scope,resourceId,{probeScheduler:true});
+ assert.equal(unavailable.project_access,'unobserved');
+ assert.equal(unavailable.project_access_reason,'service_unavailable');
+ assert.equal(unavailable.service_status,'unavailable');
+ assert.deepEqual(unavailable.service_failure,{channel:'job_service',observed_at:new Date(30000).toISOString(),
+  step:'project_observation',reason:'ssh_service_registration_identity_changed'});
+ assert.equal(unavailable.command_available,true);
+ assert.equal(unavailable.scheduler.reason,'service_unavailable');
+ assert.deepEqual((await manager.list(scope)).resources[0].serviceFailure,unavailable.service_failure);
 });
 
 test('private services verify exact registration, authorize the selected worker projects and preserve original run provenance',async t=>{

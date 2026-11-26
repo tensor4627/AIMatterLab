@@ -787,7 +787,7 @@ export function App(){
    case 'short-check': {
     const check=english?`Use studio-install-readiness to prepare the installation check ${shortCase}. Use the selected resource and registered environment. Show me the inputs and resources before running.`:
       `请按 studio-install-readiness 准备安装短例 ${shortCase}。沿用所选计算资源和已登记环境，先给我看输入和资源，再决定执行。`;
-    if(await newConversation(true,check,provider))setLesson({destination,shortCase});
+    if(await newConversation(true,check,provider,setupGuidance('installation.readiness',t('安装与就绪检查'))))setLesson({destination,shortCase});
     break;
    }
    default: if(await go(destination))setLesson({destination,...source?{source}:{}});
@@ -888,7 +888,7 @@ export function App(){
   const text=settings.language==='en'?`Use this exact compute resource: ${target}. ${instructions[route]} Read the resource tool setup guidance, use list_resource_tools for available targets, and save a reviewed draft through plan_resource_tool_setup for route ${route}. I will review it in tool setup before any installation or test.\n${details}`:
    `使用这个计算资源 ${target}。${zh[route]}请读工具配置指导，用 list_resource_tools 核对可用的测试目标，再按 ${route} 路线用 plan_resource_tool_setup 保存待核对草稿。回到工具配置由我审阅后再安装或测试。\n${details}`;
   setToolSetupReview({...toolSetup,route,newPlanAfter:setupIds,conversationId:selectedConversationRef.current?.id,selectionSeq:conversationSelectionSeq.current,provider:agentProvider});
-  closeResourceTools();askAgent(text,toolSetup.taskId);
+  closeResourceTools();askAgent(text,toolSetup.taskId,setupGuidance('cluster.resource-tools',t('配置资源工具')));
  }
  function acceptConversationWithToolPlan(value:Conversation|null,nonce?:string){
   acceptAgentConversation(value,nonce);
@@ -1029,7 +1029,7 @@ export function App(){
    setAgentIntent({id:crypto.randomUUID(),threadId:task.threadId,provider:task.provider,taskId:task.id,text:text+(request.includePrivate?t(' 已共享的私有定义请按页面中明确选择的本服务商共享范围读取。'):t(' 私有库内容尚未授权共享时不要读取或附加正文。'))});
   }catch(error){onError(error);}
  }
- async function openWorkflowDiscussion({taskId,provider,threadId,text}:DiagnosticRepairRequest){
+ async function openWorkflowDiscussion({taskId,provider,threadId,text,skill}:DiagnosticRepairRequest & Pick<AgentIntent,'skill'>){
   const task=agentTasks.find(value=>value.id===taskId);
   if(!task||task.provider!==provider||task.threadId!==threadId)return;
   const id=provider+':'+threadId,seq=++conversationSelectionSeq.current;
@@ -1051,17 +1051,24 @@ export function App(){
    }
    setAgentVisible(true);
    setPrimaryPanel('agent');
-   setAgentIntent({id:crypto.randomUUID(),taskId,provider,threadId,text});
+   setAgentIntent({id:crypto.randomUUID(),taskId,provider,threadId,text,skill});
   }catch(error){if(current())onError(error);}
  }
- function askAgent(text:string,taskId?:string){
+ function openAgentDraft(intent:Omit<AgentIntent,'id'>){
+  setPrimaryPanel('agent');setAgentVisible(true);setAgentIntent({...intent,id:crypto.randomUUID()});
+ }
+ function setupGuidance(functionId:string,name:string):NonNullable<AgentIntent['skill']>{
+  return {attachmentId:crypto.randomUUID(),name,functionId,fromDraft:true};
+ }
+ function askAgent(text:string,taskId?:string,skill?:AgentIntent['skill']){
   if(taskId){
    const task=agentTasks.find(value=>value.id===taskId);
    if(!task?.provider||!task.threadId)return onError(new Error(t('此流程的会话绑定已变化，请重新打开该流程。')));
-   void openWorkflowDiscussion({taskId,provider:task.provider,threadId:task.threadId,text});
+   void openWorkflowDiscussion({taskId,provider:task.provider,threadId:task.threadId,text,skill});
    return;
   }
-  setPrimaryPanel('agent');setAgentVisible(true);setAgentIntent({id:crypto.randomUUID(),text});
+  const conversation=selectedConversationRef.current;
+  openAgentDraft(skill?{text,provider:conversation?.provider??agentProvider,threadId:conversation?.threadId??null,skill}:{text});
  }
  function helpWithSshServiceEnvironment(profile:SshEnvironmentHelpTarget){
   if(guidePage){rememberCluster({profileId:profile.id,profileVersion:profile.version,name:profile.name},'ssh-service');setLesson({destination:'ssh-service'});}
@@ -1069,7 +1076,7 @@ export function App(){
   const text=settings.language==='en'?
    `Please use "${profile.name}" to inspect its AIMatterLab SSH job-service environment. The saved profile ID is ${profile.id}, version ${profile.version}${profile.connectionId?`, and the open connection is ${profile.connectionId}`:''}. Read cluster.connection-setup and environment.probe. Check the exact connection with list_compute_resources and use one selector with acquire_compute_resource. If there is already a manual share, use the terminal only when it matches this connection. Reuse this authenticated connection to inspect a Conda, venv or module environment and verify Python and sqlite3. Report the interpreter path and required activation commands for me to save. If the resource or permission is unavailable, report its actual state. Do not start another SSH login, handle credentials, install software, change project permissions or submit jobs. Claim service readiness only with a verified receipt.`:
    `请使用「${profile.name}」检查 AIMatterLab 的 SSH 作业服务环境。保存的配置 ID 为 ${profile.id}，版本 ${profile.version}${profile.connectionId?`，原连接为 ${profile.connectionId}`:''}。读取 cluster.connection-setup 和 environment.probe。用 list_compute_resources 核对原连接，再用一个选择参数调用 acquire_compute_resource。已有人工共享时，请核对共享终端与原连接相符后使用。复用这条已认证连接查找已有 Conda、venv 或 module 环境，核对 Python 和 sqlite3，给出解释器路径和所需激活命令，由我保存。资源或权限不可用时，报告实际状态。不要新建 SSH 登录、代输认证信息、安装软件、更改项目授权或提交作业。拿到服务核验回执后才能报告服务就绪。`;
-  askAgent(text);
+  askAgent(text,undefined,setupGuidance('cluster.connection-setup',t('集群连接与环境配置')));
  }
  function moveHandoffLesson(stage:HandoffLessonStage,profile:SshEnvironmentHelpTarget){
   if(!guidePage||!lesson||!['ssh-login','ssh-workspace','ssh-service-observe'].includes(lesson.destination))return;
@@ -1461,7 +1468,7 @@ export function App(){
       <StructureBuilder projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()}/>
       <MaterialsProjectSearch projectId={project?.id||''} environments={environments} worker={worker&&!disconnected} workerScope={assetWorkerScope} onSaved={()=>void refresh()}/>
      </div>}
-     {section==='environments'&&<ComputeEnvironments worker={worker&&!disconnected} workerGeneration={workerHydrationEpoch.current} environments={environments} onRefresh={()=>refresh()} onConnect={openComputeResources} onManual={newEnvironment} onAgent={askAgent} onCluster={openComputeResources} onError={onError}/>}
+     {section==='environments'&&<ComputeEnvironments worker={worker&&!disconnected} workerGeneration={workerHydrationEpoch.current} environments={environments} onRefresh={()=>refresh()} onConnect={openComputeResources} onManual={newEnvironment} onAgent={text=>askAgent(text,undefined,setupGuidance('environment.probe',t('计算环境探测')))} onCluster={openComputeResources} onError={onError}/>}
      {section==='compute-resources'&&<ComputeResourceConsole projectId={projectId} onConnections={openComputeResources} onConnectSsh={connectConsoleSsh} onOpenTerminal={openConsoleTerminal} onOpenConversation={channel=>void openConsoleConversation(channel)} onWorkspace={openConsoleWorkspace} onUseForWorkflow={resource=>usePublishedWorkflow({connectionId:resource.connectionId!,profileId:resource.profileId,profileVersion:resource.profileVersion})} onTools={openResourceTools} onGuide={openResourceGuide} onConfigure={(resource,section)=>configureTerminalSsh({profileId:resource.profileId,profileVersion:resource.profileVersion,section},resource.connectionId||undefined)}/>}
      {section==='ssh'&&<ClusterPage key={clusterSettingsSource||workerHydrationEpoch.current} sourceId={clusterSettingsSource} workerGeneration={workerHydrationEpoch.current} visible={workspacePanelVisible} selectedClusterId={clusterSelection||undefined} serviceVersion={serviceVersion} onAuthenticate={openSshGuide} onConnectCompute={connectWorker} worker={worker&&!disconnected} project={project} settings={settings} draft={clusterDraft} onQueueTest={async text=>{await newConversation(true,text);}} onError={onError} onRefresh={()=>void refresh()} onAgent={askAgent} onRun={id=>setSection('cluster-run:'+id)} onTerminal={startClusterTerminal}/>}
      {section==='extensions'&&<div className="page"><ToolPackagesPanel provider={agentProvider} onSelect={selectToolSkill}/></div>}

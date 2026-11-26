@@ -5,8 +5,10 @@ import type {invoke as Invoke} from '../../api/studio';
 import {storedConversation,storeConversation} from './selection-preference';
 export {storedConversation,storeConversation} from './selection-preference';
 
-export interface SessionSelection{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string;provider?:AgentProvider;adoptedDraftId?:string}
-interface FreshSelection{sequence:number;promise:Promise<unknown>;failed?:boolean;planning:boolean;initialPrompt?:string;provider?:AgentProvider}
+import type {AgentIntent} from './agent-types';
+
+export interface SessionSelection{nonce:string;conversation?:Conversation;new?:boolean;pending?:boolean;error?:string;initialPrompt?:string;initialGuide?:AgentIntent['skill'];provider?:AgentProvider;adoptedDraftId?:string}
+interface FreshSelection{sequence:number;promise:Promise<unknown>;failed?:boolean;planning:boolean;initialPrompt?:string;initialGuide?:AgentIntent['skill'];provider?:AgentProvider}
 export interface ConversationSelectionPorts{
  invoke:typeof Invoke;
  mounted:MutableRefObject<boolean>;
@@ -64,14 +66,14 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
    if(!localHistory)setSessionSelection({nonce:crypto.randomUUID(),conversation:selected});
   }catch(error){if(seq===conversationSelectionSeq.current&&mounted.current)onSelectionError(error);}
  }
- async function newConversation(planning=false,initialPrompt?:string,provider?:AgentProvider){
+ async function newConversation(planning=false,initialPrompt?:string,provider?:AgentProvider,initialGuide?:AgentIntent['skill']){
   if(awaitingEditor.current||editorDirty&&!await approveEditorReplacement())return;
   const previous=selectedConversationRef.current;beforeSelection();const sequence=++conversationSelectionSeq.current;beginWorkerGate();clearIntent();
-  const promise=invoke('conversation.select',{new:true,...provider?{provider}:{}});freshSelectionPending.current={sequence,promise,planning,initialPrompt,provider};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
+  const promise=invoke('conversation.select',{new:true,...provider?{provider}:{}});freshSelectionPending.current={sequence,promise,planning,initialPrompt,provider,initialGuide};setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true});
   try{
    await promise;if(sequence!==conversationSelectionSeq.current||!mounted.current)return;
    freshSelectionPending.current=null;conversationChanged(null);setPlanningMode(planning);onFreshSelected();
-   setSessionSelection({nonce:crypto.randomUUID(),new:true,...initialPrompt!==undefined?{initialPrompt}:{},...provider?{provider}:{}});void observeWorker();return true;
+   setSessionSelection({nonce:crypto.randomUUID(),new:true,...initialPrompt!==undefined?{initialPrompt}:{},...initialGuide?{initialGuide}:{},...provider?{provider}:{}});void observeWorker();return true;
   }catch(error){
    if(sequence!==conversationSelectionSeq.current||!mounted.current)return;onError(error);
    if(previous)try{
@@ -82,6 +84,6 @@ export function useConversationSelection(ports:ConversationSelectionPorts){
    setSessionSelection({nonce:crypto.randomUUID(),new:true,pending:true,error:language==='en'?'The new chat is not ready. Try again.':'新对话尚未准备好，请重试。'});
   }
  }
- const retryNewConversation=()=>newConversation(freshSelectionPending.current?.planning||false,freshSelectionPending.current?.initialPrompt,freshSelectionPending.current?.provider);
+ const retryNewConversation=()=>newConversation(freshSelectionPending.current?.planning||false,freshSelectionPending.current?.initialPrompt,freshSelectionPending.current?.provider,freshSelectionPending.current?.initialGuide);
  return {conversations,setConversations,selectedConversationId,setSelectedConversationId,selectedConversationRef,conversationSelectionSeq,sessionSelection,setSessionSelection,freshSelectionPending,agentBusy,setAgentBusy,planningMode,setPlanningMode,conversationChanged,acceptAgentConversation,chooseConversation,newConversation,retryNewConversation};
 }

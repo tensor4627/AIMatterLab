@@ -43,8 +43,11 @@ test('managed chat sends without preparing a legacy SSH terminal when both resou
  h.unmount();
 });
 
-test('SSH environment help drafts a recognized request for the exact saved resource without booking a terminal',async()=>{
- const h=appWorkerHarness();
+for(const language of ['zh-CN','en'])test('SSH environment help selects the setup guide for the submitted draft in '+language,async()=>{
+ const h=appWorkerHarness({override:async(method,data,standard)=>{
+  const result=await standard(method,data);
+  return method==='state'?{...result,settings:{...result.settings,language}}:result;
+ }});
  await h.flush();
  h.find(node=>node.props?.['data-testid']==='unified-compute-entry').props.onClick();
  await h.flush();
@@ -56,12 +59,25 @@ test('SSH environment help drafts a recognized request for the exact saved resou
  const {intent}=h.find(node=>node.type==='./Agent').props;
  assert.equal(intent.autoSend,undefined);
  assert(requestsComputeName(intent.text.normalize('NFKC').toLowerCase(),profile.name));
- assert.match(intent.text,/saved-ssh.*版本 3/);
- assert.match(intent.text,/list_compute_resources.*一个选择参数.*acquire_compute_resource/);
- assert.match(intent.text,/已有人工共享时/);
+ assert.match(intent.text,/saved-ssh.*(?:版本 3|version 3)/);
+ assert.match(intent.text,/list_compute_resources.*(?:一个选择参数|one selector).*acquire_compute_resource/);
+ assert.match(intent.text,/已有人工共享时|already a manual share/);
+ assert.match(intent.text,/cluster\.connection-setup.*environment\.probe/);
+ assert.equal(intent.skill.functionId,'cluster.connection-setup');
  assert.doesNotMatch(intent.text,/交给 Agent|private-host|private-user|private-interpreter/);
  assert(!h.calls.slice(before).some(call=>call.method==='agent.rpc'||call.method.startsWith('sharedTerminal.')));
- h.unmount();
+ const agent=agentHarness({props:{onAttachmentSelect:value=>agent.render({skill:value}),onAttachmentConsumed:()=>agent.render({skill:undefined})}});
+ try{
+  await agent.flush();agent.click('agent-connect');await agent.flush();
+  agent.render({intent});await agent.flush();
+  assert.equal(agent.textarea().props.value,intent.text);
+  noModelOrTask(agent);
+  agent.send();await agent.flush();
+  const turn=agent.calls.find(call=>call.data?.method==='turn/start');
+  assert.equal(turn.data.params.studioSkillId,'cluster.connection-setup');
+  assert.equal(turn.data.params.input[0].text,intent.text);
+  assert.throws(()=>agent.find(node=>node.props?.className==='skill-chip'),/not found/);
+ }finally{agent.unmount();h.unmount();}
 });
 
 test('saving a repaired Python configuration follows the verified original SSH connection and shell',async()=>{

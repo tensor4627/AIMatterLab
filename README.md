@@ -2,7 +2,7 @@
 
 AIMatterLab 是基于 GPU Sampling Studio 的科学计算桌面工作台。用户与 Agent 共同编写可检查的输入，在明确选择的计算环境中执行，并从作业记录回看结果。除了已有的 PyDyn、GPUMD、pyGAS、NEP 和 HotPP 工作流，第三方开发者也可以通过版本化工具包扩展工作台。
 
-[更新日志](CHANGELOG.md) · [0.2.11 变更与验证记录](docs/releases/aimatterlab-0.2.11.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
+[更新日志](CHANGELOG.md) · [0.2.12 变更与验证记录](docs/releases/aimatterlab-0.2.12.md) · [软件规范](docs/software-specification.md) · [代码架构](docs/architecture.md) · [第三方开发者接入](developer/README.md)
 
 要安装 GPU-Sampling、pyGAS、PyDyn、TorchNEP、HotPP 或 HotHam，可以在「工具与资源 → 第三方工具包 → 随版本收录的源码仓库」复制克隆命令，再按工具仓库提供的说明安装。源码和桌面版都随附这份[工具仓库清单](installation/tool-sources.json)。
 
@@ -12,9 +12,9 @@ HotHam 的交付入口为 `aimlab-tools/SKILL.md`。安装与文档测试已有�
 
 ## 启动
 
-0.2.11 统一桌面反馈、主操作、折叠区和键盘提示，改善窄窗布局与任务状态显示。计算流程可查找、导入并绑定实际输入，普通对话可从输入区直接选择计算资源。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.11.md)
+0.2.12 修复 SSH 作业服务重新核验、项目授权检查和配置草稿中的问题。服务失效时，Agent 可查看失败步骤和当前仍可用的通道。[本轮实测与验证范围](docs/releases/aimatterlab-0.2.12.md)
 
-Windows x64 签名安装器从 GitHub 下载。[0.2.11 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.2.11)
+Windows x64 签名安装器从 GitHub 下载。[0.2.12 发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.2.12)
 
 首次安装时选择一个可写目录，升级时选择原工作区。完成后可从桌面快捷方式或工作区根目录的 `AIMatterLab.exe` 启动。源码放在 `sources/`，用户缓存和技能默认放在 `user-cache/`。[项目提示词和用户技能](docs/project-skill-workspace.md)
 

@@ -86,6 +86,31 @@ for(const provider of ['codex','qwen'])test('Agent same-render conversation sele
 test('Agent same-render deliberate new conversation and non-auto intent populate only the new blank identity',async()=>{
  const storage=memoryStorage();seed(storage,'codex','first','Keep existing conversation');const h=agentHarness({storage,props:{sessionSelection:{nonce:'first',conversation:conversation('codex','first')}}});await h.flush();h.render({sessionSelection:{nonce:'fresh',new:true},intent:{id:'fresh-discussion',text:'Discuss a new draft'}});await h.flush();assert.equal(h.textarea().props.value,'Discuss a new draft');const drafts=createComposerDrafts(()=>storage);assert.deepEqual(drafts.owner(),{provider:'codex',threadId:null});assert.equal(drafts.text(),'Discuss a new draft');drafts.activate('codex','first');assert.equal(drafts.text(),'Keep existing conversation');assert.equal(starts(h).length,0);h.unmount();
 });
+for(const choice of ['cancel','append','replace'])test('a proposed SSH guide follows the user’s draft choice: '+choice,async()=>{
+ const first=conversation('codex','first'),other=conversation('codex','other');
+ const guide={attachmentId:'ssh-guide',name:'SSH setup',functionId:'cluster.connection-setup',fromDraft:true};
+ const manual={attachmentId:'manual-guide',name:'Manual selection',functionId:'environment.probe'};
+ let selected=manual;
+ const h=agentHarness({props:{sessionSelection:{nonce:'first',conversation:first},
+  onAttachmentClear:()=>{selected=undefined;}}});
+ const storedGuide=id=>{const drafts=createComposerDrafts(()=>h.storage);drafts.activate('codex',id);return drafts.guide();};
+ try{
+  await h.flush();h.type('My original draft');selected=manual;h.render({skill:manual,
+   intent:{id:'ssh-draft',provider:first.provider,threadId:first.threadId,text:'Check the SSH environment',skill:guide}});
+  await h.flush();assert.equal(selected,manual);
+  h.click('agent-prompt-'+choice);await h.flush();
+  assert.equal(selected,choice==='cancel'?manual:undefined);
+  assert.deepEqual(storedGuide(first.threadId),choice==='cancel'?undefined:guide);
+  assert.equal(h.textarea().props.value,{cancel:'My original draft',append:'My original draft\n\nCheck the SSH environment',replace:'Check the SSH environment'}[choice]);
+  h.render({skill:selected});
+  if(choice==='replace'){h.type('');assert.equal(storedGuide(first.threadId),undefined);}
+  h.render({skill:undefined,sessionSelection:{nonce:'other',conversation:other}});await h.flush();
+  assert.equal(storedGuide(other.threadId),undefined);assert.equal(h.textarea().props.value,'');
+  h.render({sessionSelection:{nonce:'return-to-first',conversation:first}});await h.flush();
+  assert.deepEqual(storedGuide(first.threadId),choice==='append'?guide:undefined);
+  assert.equal(starts(h).length,0);
+ }finally{h.unmount();}
+});
 for(const mismatch of ['thread','provider'])test('Agent wrong-owner non-auto intent is ignored permanently rather than replayed later: '+mismatch,async()=>{
  const storage=memoryStorage();seed(storage,'codex','first','Keep first');seed(storage,'qwen','second','Keep target');const h=agentHarness({storage,props:{sessionSelection:{nonce:'first',conversation:conversation('codex','first')}}});await h.flush();const intent={id:'stale',provider:mismatch==='thread'?'codex':'qwen',threadId:mismatch==='thread'?'second':'first',text:'Stale target text'};h.render({intent});await h.flush();assert.equal(h.textarea().props.value,'Keep first');h.render({sessionSelection:{nonce:'later',conversation:conversation(intent.provider,intent.threadId)}});await h.flush();assert.notEqual(h.textarea().props.value,'Stale target text');h.type('New target typing');h.render({sessionSelection:{nonce:'later-again',conversation:conversation(intent.provider,intent.threadId)}});await h.flush();assert.equal(h.textarea().props.value,'New target typing');assert.equal(starts(h).length,0);h.unmount();
 });
@@ -180,5 +205,55 @@ test('studio/conversationDeleted clears queued follow-up UI state immediately',a
   h.emit({method:'studio/conversationDeleted',params:{provider:'codex',threadId:'queued-chat'}});
   await h.flush();
   assert(!JSON.stringify(h.find(n=>true)).includes('queued follow-up'));
+ }finally{h.unmount();}
+});
+
+test('a new installation check draft keeps its explicit guide through first send',async()=>{
+ const guide={attachmentId:'onboarding-check',name:'Installation and readiness checks',functionId:'installation.readiness',fromDraft:true};
+ const h=agentHarness({props:{sessionSelection:{nonce:'new-guide',new:true,initialPrompt:'Prepare the CPU check',initialGuide:guide}}});
+ try{
+  await h.flush();assert.equal(h.textarea().props.value,'Prepare the CPU check');
+  assert.equal(starts(h).length,0);
+  h.click('agent-connect');await h.flush();h.send();await h.flush();
+  assert.equal(starts(h)[0].data.params.studioSkillId,'installation.readiness');
+  assert.equal(starts(h)[0].data.params.input[0].text,'Prepare the CPU check');
+ }finally{h.unmount();}
+});
+
+test('moving a guided queued message back keeps its public function on the original draft',async()=>{
+ const chat=conversation('codex','queued-guide');
+ const item={id:'queued-guide-1',text:'Check the selected cluster tool',skillName:'Resource tool setup',skillFunctionId:'cluster.resource-tools',status:'queued'};
+ const h=agentHarness({props:{sessionSelection:{nonce:'show-guide',conversation:chat}},override(method,data,standard){
+  if(method==='conversation.remember')return chat;
+  if(method==='agent.queue')return {queue:{provider:chat.provider,threadId:chat.threadId,revision:1,pause:null,after:null,
+   items:data.action==='remove'?[]:[item]}};
+  return standard(method,data);
+ }});
+ try{
+  await h.flush();h.click('agent-queued-to-draft');await h.flush();
+  assert.equal(h.textarea().props.value,item.text);
+  const draft=createComposerDrafts(()=>h.storage);draft.activate(chat.provider,chat.threadId);
+  assert.equal(draft.guide()?.functionId,item.skillFunctionId);
+  assert.equal(h.calls.filter(c=>c.method==='agent.queue'&&c.data.action==='remove').length,1);
+  assert.equal(starts(h).length,0);
+ }finally{h.unmount();}
+});
+
+test('clearing a manual override clears the displayed draft guidance before send',async()=>{
+ const guide={attachmentId:'ssh-guide',name:'SSH setup',functionId:'cluster.connection-setup',fromDraft:true};
+ const manual={attachmentId:'manual-guide',name:'Manual selection',functionId:'environment.probe'};
+ let cleared=false;
+ const h=agentHarness({props:{intent:{id:'setup-draft',provider:'codex',threadId:null,text:'Check the SSH environment',skill:guide},
+  onAttachmentClear:()=>{cleared=true;}}});
+ try{
+  await h.flush();h.render({skill:manual});await h.flush();
+  assert.match(JSON.stringify(h.find(n=>n.props?.className==='skill-chip')),/Manual selection/);
+  h.find(n=>n.type==='button'&&n.props?.['aria-label']==='移除本条消息技能').props.onClick();
+  assert.equal(cleared,true);
+  h.render({skill:undefined});await h.flush();
+  assert.throws(()=>h.find(n=>n.props?.className==='skill-chip'));
+  h.click('agent-connect');await h.flush();h.send();await h.flush();
+  assert.equal(starts(h)[0].data.params.studioSkillId,undefined);
+  assert.equal(starts(h)[0].data.params.input[0].text,'Check the SSH environment');
  }finally{h.unmount();}
 });

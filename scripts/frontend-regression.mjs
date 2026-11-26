@@ -312,9 +312,13 @@ try{
   await fs.writeFile(path.join(out,'shared-terminal-last-row-geometry.json'),JSON.stringify({scope:'Real browser component and xterm geometry with synthetic IPC; not native or SSH acceptance',measurements,restored},null,2));
   await p.screenshot({path:path.join(out,'shared-terminal-last-row-visible.png')});
  });
- for(const guided of [false,true])await check(guided?'interaction-experience-guided-ssh':'app-cold-start-three-pane-strict-mode-terminal-handoff',async p=>{
+ for(const [name,guided,repairDraft] of [
+  ['app-cold-start-three-pane-strict-mode-terminal-handoff',false,false],
+  ['interaction-experience-guided-ssh',true,false],
+  ['ssh-service-repair-draft-experience',false,true],
+ ])await check(name,async p=>{
   if(!guided)await p.setViewportSize({width:1240,height:800});
-  await p.evaluate(async guided=>{
+  await p.evaluate(async ({guided,repairDraft})=>{
    const test=window.__test,original=window.studio.invoke,profile={id:'fixture-ssh',version:1,kind:'ssh',name:'Fixture SSH',host:'fixture.invalid',username:'fixture',port:22,ssh_client:'ssh',mode:'interactive'};
    if(!guided)Object.assign(test.settings,{fontSize:24,minimumFontSize:18,chatFontSize:24});
    const target={connectionId:'fixture-connection',profileId:profile.id,profileVersion:profile.version};
@@ -352,7 +356,8 @@ try{
     if(method==='compute.managed.serviceStatus'){
      test.calls.push({method,data});
      if(!publication||!matchesTarget(data))throw Error('managed_compute_resource_unavailable');
-     return {...target,schemaVersion:2,status:'idle',operator:'human',workflowReady:false,serviceActive:false};
+     return {...target,schemaVersion:2,status:repairDraft?'failed':'idle',operator:'human',workflowReady:false,serviceActive:false,
+      ...repairDraft?{error:{code:'sqlite_unavailable'}}:{}};
     }
     if(['compute.resourceWorkspace.preview','compute.resourceWorkspace.confirm','compute.managed.publish'].includes(method)){
      test.calls.push({method,data});
@@ -382,7 +387,7 @@ try{
    };
    const App=(await import('/frontend/app/App.tsx')).default;
    window.testRoot.render(React.createElement(React.StrictMode,null,React.createElement(App)));
-  },guided);
+  },{guided,repairDraft});
   if(guided){
    const guide=p.getByTestId('setup-assistant'),spot=p.getByTestId('guide-spotlight');
    await guide.getByRole('button',{name:/远程集群/}).click();
@@ -404,7 +409,8 @@ try{
   await p.locator('.home-page').waitFor();assert.equal(await p.locator('.sidebar').isVisible(),true);assert.equal(await p.locator('.agent-panel').isVisible(),true);
   await p.waitForFunction(()=>parseFloat(getComputedStyle(document.documentElement).fontSize)===24);
   await p.waitForFunction(()=>window.__test.calls.some(call=>call.method==='worker.request'&&call.data.target==='/api/runs'));
-  await p.getByTestId('new-conversation').click();await p.locator('.composer textarea').fill('Keep these unsent cluster instructions');
+  await p.getByTestId('new-conversation').click();
+  if(!repairDraft)await p.locator('.composer textarea').fill('Keep these unsent cluster instructions');
   await p.getByTestId('unified-compute-entry').click();await p.getByTestId('saved-compute-profile').getByRole('button',{name:'交互式登录',exact:true}).click();
   const auth=p.getByRole('region',{name:'SSH 登录终端',exact:true});
   await auth.locator('.xterm-rows').getByText('Fixture authentication>',{exact:false}).waitFor();
@@ -424,6 +430,26 @@ try{
   await review.getByTestId('resource-workspace-confirm').click();
   await review.waitFor({state:'hidden'});
   await p.getByTestId('ssh-managed-status').waitFor();
+  if(repairDraft){
+   const help=p.getByTestId('ssh-service-agent-help');
+   assert.equal(await help.innerText(),'让 Agent 配置');
+   await help.click();
+   const composer=p.locator('.composer');
+   await composer.locator('.skill-chip').getByText('仅下条消息 · 集群连接与环境配置',{exact:true}).waitFor();
+   const draft=await composer.locator('textarea').inputValue();
+   assert.match(draft,/Fixture SSH.*fixture-ssh.*fixture-connection.*cluster\.connection-setup.*environment\.probe/);
+   const turnStarts=()=>p.evaluate(()=>window.__test.calls.filter(call=>call.method==='agent.rpc'&&call.data.method==='turn/start').map(call=>call.data.params));
+   assert.deepEqual(await turnStarts(),[]);
+   const connect=p.getByTestId('agent-connect');
+   if(await connect.isVisible())await connect.click();
+   await composer.getByRole('button',{name:'发送',exact:true}).click();
+   await p.waitForFunction(()=>window.__test.calls.some(call=>call.method==='agent.rpc'&&call.data.method==='turn/start'));
+   const sent=await turnStarts();
+   assert.equal(sent.length,1);
+   assert.equal(sent[0].studioSkillId,'cluster.connection-setup');
+   assert.equal(sent[0].input[0].text,draft);
+   return;
+  }
   assert.equal(await p.locator('.composer textarea').inputValue(),'Keep these unsent cluster instructions');
   assert.equal(await host.evaluate(node=>node.isConnected&&node===document.querySelector('[data-guide-target="ssh-shell"]')),true);
   await chooseLayout(p,'priority-chat');assert.equal(await p.locator('.main-column').isVisible(),true);assert.equal(await p.locator('.agent-panel').isVisible(),true);

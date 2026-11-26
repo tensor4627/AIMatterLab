@@ -108,9 +108,10 @@ function sshResourceReady(resource:ComputeResourceState|null|undefined,tools:Age
  const workflow=resource.workflowReady===true&&resource.managedRuns===true&&resource.authentication==='verified';
  return workflow?tools.scope!=='terminal-only':tools.scope==='terminal-only';
 }
-export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation,onOpenDiscussion,activity,attentionTarget,setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,selectedLocalConversation,isLocalConversationCurrent,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,workspaceProfileId,onComputeResource,onReviewResourceTool,missingWorkflowToolQuestion}:{terminalDraft?:RefObject<((provider:AgentProvider)=>string|undefined)|null>;historyTarget?:ConversationHistoryTarget;onOpenHistoryLocation?:(target:ConversationAnchor)=>void;onOpenDiscussion?:(conversation:Conversation,draft?:string)=>void;activity?:ConversationActivity;attentionTarget?:ConversationAttentionTarget;setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onReviewResourceTool?:()=>void;missingWorkflowToolQuestion?:MissingWorkflowToolQuestion;workspaceProfileId?:string;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;selectedLocalConversation?:Pick<Conversation,'provider'|'threadId'>|null;isLocalConversationCurrent?:()=>boolean;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
+export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation,onOpenDiscussion,activity,attentionTarget,setupProviderChoice,onSetupReply,onOpenHistory,onCollapse,conversationGroupId,onOpenAccounts,planningMode,onPlanningModeChange,context,onError,skill:selectedSkill,width,onOpenRun,intent,projectId,onOpenTask,sessionSelection,selectedLocalConversation,isLocalConversationCurrent,onConversation,onBusyChange,onNewConversation,hidden,visibleWorkflowId,onProviderChange,onAttachmentConsumed,onAttachmentClear,computeConnected,onConnectCompute,onReviewWorker,onOpenCluster,onOpenOriginalRun,computeResource,workspaceProfileId,onComputeResource,onReviewResourceTool,missingWorkflowToolQuestion}:{terminalDraft?:RefObject<((provider:AgentProvider)=>string|undefined)|null>;historyTarget?:ConversationHistoryTarget;onOpenHistoryLocation?:(target:ConversationAnchor)=>void;onOpenDiscussion?:(conversation:Conversation,draft?:string)=>void;activity?:ConversationActivity;attentionTarget?:ConversationAttentionTarget;setupProviderChoice?:{provider:AgentProvider;nonce:string};onSetupReply?:(reply:{provider:AgentProvider;model:string}|null)=>void;onComputeResource?:(state:ComputeResourceState)=>void;onOpenHistory?:()=>void;onReviewResourceTool?:()=>void;missingWorkflowToolQuestion?:MissingWorkflowToolQuestion;workspaceProfileId?:string;onCollapse?:()=>void;computeResource?:ComputeResourceState|null;onOpenOriginalRun?:(runId:string)=>void;onOpenCluster?:()=>void;computeConnected?:boolean;onConnectCompute?:()=>void|Promise<void>;onReviewWorker?:()=>void|Promise<void>;conversationGroupId?:string|null;onOpenAccounts?:(provider:AgentProvider)=>void;planningMode:boolean;onPlanningModeChange:(value:boolean)=>void;projectId?:string;onOpenTask?:(id:string)=>void;intent?:AgentIntent;width?:number;context:string;onError:(e:unknown)=>void;skill?:SkillAttachment;onProviderChange?:(provider:AgentProvider)=>void;onAttachmentConsumed?:(attachmentId:string)=>void;onAttachmentClear?:()=>void;onOpenRun?:(id:string)=>void;sessionSelection?:SessionSelection;selectedLocalConversation?:Pick<Conversation,'provider'|'threadId'>|null;isLocalConversationCurrent?:()=>boolean;onConversation?:(value:Conversation|null,selectionNonce?:string)=>void;onBusyChange?:(busy:boolean)=>void;onNewConversation?:()=>void;hidden?:boolean;visibleWorkflowId?:string|null}){
  const {show:showToast}=useToast();
  const draftsRef=useRef<ReturnType<typeof createComposerDrafts>|null>(null);if(!draftsRef.current){draftsRef.current=createComposerDrafts(()=>localStorage);const selected=sessionSelection?.conversation;if(selected)draftsRef.current.activate(selected.provider,selected.threadId);else if(sessionSelection?.new)draftsRef.current.activate(draftsRef.current.owner().provider,null,true);}const drafts=draftsRef.current;
+ const draftGuide=useSyncExternalStore(drafts.subscribe,drafts.guide),skill=selectedSkill??draftGuide;
  const [needsAuth,setNeedsAuth]=useState(false);
  const [nativeDefaults,setNativeDefaults]=useState<NativeCodexDefaults|null>(null);
  const [defaultsReview,setDefaultsReview]=useState<'model'|'effort'|null>(null);
@@ -144,7 +145,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const conversationRef=useRef(onConversation);conversationRef.current=onConversation;const consumedIntent=useRef(''),selectionSeq=useRef(0),selectionPending=useRef(false),connectionOwner=useRef<{provider:AgentProvider;seq:number;nonce:string|undefined;promise:Promise<boolean>}|null>(null),providerTouched=useRef(false),handledSelection=useRef<string|undefined>(undefined),sendOwner=useRef<symbol|null>(null);
  const handledDraftIntents=useRef(new Set<string>());
  const [followUpQueues,setFollowUpQueues]=useState<Record<string,AgentQueueView>>({});
- const queueAdmission=useRef(new Map<string,{draft:DraftSnapshot;id:string;pending:boolean}>());
+ const queueAdmission=useRef(new Map<string,{draft:DraftSnapshot;fingerprint:string;id:string;pending:boolean}>());
  const [queueEdit,setQueueEdit]=useState<{owner:string;id:string;text:string}|null>(null);
  const queueOperations=useRef(new Set<string>());
  const [followUpEnter,setFollowUpEnter]=useState<FollowUpAction>(()=>storedPreference(followUpEnterStorageKey)==='steer'?'steer':'queue');
@@ -190,7 +191,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  const historyActions=useRef({quote:quoteMessage,branch:branchMessage,bookmark:bookmarkMessage,detail:loadMessageDetail});
  historyActions.current={quote:quoteMessage,branch:branchMessage,bookmark:bookmarkMessage,detail:loadMessageDetail};
  const [retrying,setRetrying]=useState<{threadId:string;turnId:string}|null>(null);
- const [promptProposal,setPromptProposal]=useState<{provider:string;threadId:string|null;text:string}|null>(null);
+ const [promptProposal,setPromptProposal]=useState<{provider:string;threadId:string|null;text:string;skill?:AgentIntent['skill']}|null>(null);
  const messageCallbacks=useRef({onOpenTask,onOpenRun,onOpenOriginalRun,onOpenCluster,onReviewWorker,onConnectCompute,onError});messageCallbacks.current={onOpenTask,onOpenRun,onOpenOriginalRun,onOpenCluster,onReviewWorker,onConnectCompute,onError};
  const messageActions=useRef<ChatMessageActions|null>(null);if(!messageActions.current)messageActions.current={workflow:id=>messageCallbacks.current.onOpenTask?.(id),run:id=>messageCallbacks.current.onOpenRun?.(id),originalRun:id=>messageCallbacks.current.onOpenOriginalRun?.(id),cluster:()=>messageCallbacks.current.onOpenCluster?.(),compute:()=>{void Promise.resolve().then(()=>{const cb=messageCallbacks.current;return (cb.onReviewWorker||cb.onConnectCompute)?.();}).catch(error=>messageCallbacks.current.onError(error));}};
  if(!messageActions.current.previewFile)messageActions.current.previewFile=showFile;
@@ -225,8 +226,18 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   if(result.attachmentReview)setSendNotice(t('对话已变化。请重新选取附件。'));
  }
  function selectDraft(value:AgentProvider,id:string|null=null,fresh=false){const old=drafts.owner();if(fresh||old.provider!==value||old.threadId!==id){saveReadingPosition();readingOwner.current=readingKey(value,id);readingReady.current=false;setPromptProposal(null);}drafts.activate(value,id,fresh);}
- function proposePrompt(text:string){if(drafts.text()&&drafts.text()!==text)setPromptProposal({...drafts.owner(),text});else updatePrompt(text);}
- function resolvePromptProposal(choice:'append'|'replace'|'cancel'){const proposal=promptProposal,owner=drafts.owner();setPromptProposal(null);if(!proposal||choice==='cancel'||proposal.provider!==owner.provider||proposal.threadId!==owner.threadId)return;updatePrompt(choice==='append'?[drafts.text(),proposal.text].filter(Boolean).join('\n\n'):proposal.text);}
+ function proposePrompt(text:string,draftSkill?:AgentIntent['skill']){
+  if(drafts.text()&&drafts.text()!==text){setPromptProposal({...drafts.owner(),text,skill:draftSkill});return;}
+  setPromptProposal(null);updatePrompt(text);
+  if(draftSkill){drafts.setGuide(draftSkill);if(selectedSkill)attachmentClearRef.current?.();}
+ }
+ function resolvePromptProposal(choice:'append'|'replace'|'cancel'){
+  const proposal=promptProposal,owner=drafts.owner();setPromptProposal(null);
+  if(!proposal||choice==='cancel'||proposal.provider!==owner.provider||proposal.threadId!==owner.threadId)return;
+  updatePrompt(choice==='append'?[drafts.text(),proposal.text].filter(Boolean).join('\n\n'):proposal.text);
+  if(proposal.skill){drafts.setGuide(proposal.skill);if(selectedSkill)attachmentClearRef.current?.();}
+  else if(choice==='replace')drafts.setGuide(undefined);
+ }
  function displayedTurnId(threadId:string){
   const flight=activeSend.current,observed=observedTurn.current;
   return (flight?.threadId===threadId?flight.turnId:null)||(observed?.threadId===threadId?observed.turnId:null);
@@ -777,7 +788,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   selectionPending.current=true;threadRef.current=null;setThread(null);setMessages([]);setWorkflowId(null);setHistoryLoad(sessionSelection.conversation?{provider:sessionSelection.conversation.provider,threadId:sessionSelection.conversation.threadId,projectId:sessionSelection.conversation.projectId||'',status:'loading'}:null);setApplying(true);
   if(sessionSelection.pending){pendingResume.current=null;return;}
   const activate=async()=>{try{
-   if(sessionSelection.new){const preferred=sessionSelection.provider||pendingSetupProvider.current;if(preferred&&preferred!==providerRef.current&&!await selectProvider(preferred,seq,false))return;if(seq!==selectionSeq.current)return;pendingSetupProvider.current=null;resetConversation(false);if(sessionSelection.initialPrompt!==undefined&&seq===selectionSeq.current&&sessionSelection.nonce===sessionNonceRef.current&&!sessionPendingRef.current)updatePrompt(sessionSelection.initialPrompt);if((connected||autoReconnectOnNew.current)&&(!preferred||preferred===providerRef.current))await connect(false,seq,false,null);return;}
+   if(sessionSelection.new){const preferred=sessionSelection.provider||pendingSetupProvider.current;if(preferred&&preferred!==providerRef.current&&!await selectProvider(preferred,seq,false))return;if(seq!==selectionSeq.current)return;pendingSetupProvider.current=null;resetConversation(false);if(sessionSelection.initialPrompt!==undefined&&seq===selectionSeq.current&&sessionSelection.nonce===sessionNonceRef.current&&!sessionPendingRef.current)updatePrompt(sessionSelection.initialPrompt);if(sessionSelection.initialGuide)drafts.setGuide(sessionSelection.initialGuide);if((connected||autoReconnectOnNew.current)&&(!preferred||preferred===providerRef.current))await connect(false,seq,false,null);return;}
    const selected=sessionSelection.conversation;if(!selected)return;
    const different=selected.provider!==providerRef.current;if(different&&!await selectProvider(selected.provider,seq)){if(seq===selectionSeq.current)setHistoryLoad({provider:selected.provider,threadId:selected.threadId,projectId:selected.projectId||'',status:'failed',error:t('连接尚未恢复，请连接服务商后重试。')});return;}
    if(seq!==selectionSeq.current)return;
@@ -790,11 +801,12 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  },[sessionSelection?.nonce]);
  useEffect(()=>{
   if(!intent||intent.autoSend||handledDraftIntents.current.has(intent.id))return;
+  if(intent.skill&&selectionPending.current)return;
   const owner=drafts.owner();
-  if(intent.provider&&intent.provider!==owner.provider||intent.threadId&&intent.threadId!==owner.threadId){const selected=sessionSelection?.conversation;if(!selected||intent.provider&&intent.provider!==selected.provider||intent.threadId&&intent.threadId!==selected.threadId)handledDraftIntents.current.add(intent.id);return;}
+  if(intent.provider&&intent.provider!==owner.provider||intent.threadId!==undefined&&intent.threadId!==owner.threadId){const selected=sessionSelection?.conversation;if(!selected||intent.provider&&intent.provider!==selected.provider||intent.threadId!==undefined&&intent.threadId!==selected.threadId)handledDraftIntents.current.add(intent.id);return;}
   handledDraftIntents.current.add(intent.id);
-  proposePrompt(intent.text);
- },[intent?.id,sessionSelection?.nonce,thread,provider,busy]);
+  proposePrompt(intent.text,intent.skill);
+ },[intent?.id,sessionSelection?.nonce,thread,provider,busy,applying]);
  useEffect(()=>{if(pendingDefaults||!intent?.autoSend||consumedIntent.current===intent.id||busy||queueComposer||requestsRef.current.some(isUserInputRequest)||applying||connecting||!localApiThread&&(!connected||!models.length)||terminalSelected&&!terminalReady&&!canAcquireTerminal||(intent.threadId&&thread!==intent.threadId)||(intent.provider&&providerRef.current!==intent.provider))return;consumedIntent.current=intent.id;void send(intent.text,{reviewMode:intent.reviewMode,taskId:intent.taskId});},[intent?.id,connected,busy,applying,connecting,thread,localApiThread,models.length,terminalReady,canAcquireTerminal,pendingDefaults,requests.length,followUpQueues]);
  async function send(textOverride?:string,action:{reviewMode?:boolean;taskId?:string}={}){
   if(pendingDefaults)return;
@@ -818,7 +830,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    return true;
   }
   if(!reconnectHistory&&!checkTurnResource())return;
-  const attachment=skill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,resourceSelection=resourceRef.current?.selectionId||null;
+  const attachment=manual?(selectedSkill??draft.guide):selectedSkill,selectedProvider=providerRef.current,seq=selectionSeq.current,nonce=sessionNonceRef.current,resourceSelection=resourceRef.current?.selectionId||null;
   let resourceWorkflow=resourceRef.current?.workflowReady===true,resourceGranted=resourceRef.current?.agentReady===true;
   let route=toolsRef.current.scope;const routeState=(resource:ComputeResourceState|null|undefined)=>resource?.kind==='ssh-connection'?JSON.stringify(route==='terminal-only'?resource.capabilities?.terminal:resource.capabilities?.service):null;let resourceRoute=routeState(resourceRef.current);
   const current=()=>seq===selectionSeq.current&&selectedProvider===providerRef.current&&nonce===sessionNonceRef.current&&resourceSelection===(resourceRef.current?.selectionId||null)&&(waitingForConnection||(resourceRef.current?.kind==='ssh-connection'?acquiring||route===toolsRef.current.scope&&resourceRoute===routeState(resourceRef.current):resourceWorkflow===(resourceRef.current?.workflowReady===true)&&resourceGranted===(resourceRef.current?.agentReady===true)));
@@ -993,10 +1005,14 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
  function queueError(error:unknown){
   if(followUpCurrent())setSendNotice(redactTranscriptText(error instanceof Error?error.message:String(error)));
  }
+ function queueDraftFingerprint(draft:DraftSnapshot){
+  const guide=selectedSkill??draft.guide;
+  return JSON.stringify([draft.text,draft.files.map(file=>file.id),...guide?[guide.functionId??guide.attachmentId]:[]]);
+ }
  useEffect(()=>{
   if(!queueKey||!thread||!followUpCurrent())return;
   const legacy=readLegacyFollowUps(()=>localStorage,provider,thread);
-  const draft=drafts.capture(),fingerprint=JSON.stringify([draft.text,draft.files.map(file=>file.id)]);
+  const draft=drafts.capture(),fingerprint=queueDraftFingerprint(draft);
   const pendingId=readQueueAdmission(()=>localStorage,queueKey,fingerprint);
   void (async()=>{
    if(legacy.length){
@@ -1017,15 +1033,16 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   if(!queueKey||!queueAllowed||!followUpCurrent()||sendOwner.current||steering.current.has(queueKey)||queueAdmission.current.get(queueKey)?.pending)return;
   if(readingFiles.current.has(draft.entry))return;
   if(!draft.text.trim()&&!draft.files.length)return;
-  const prior=queueAdmission.current.get(queueKey),fingerprint=JSON.stringify([draft.text,draft.files.map(file=>file.id)]);
-  const previousId=prior&&prior.draft.entry===draft.entry&&prior.draft.revision===draft.revision?prior.id:readQueueAdmission(()=>localStorage,queueKey,fingerprint);
+  const prior=queueAdmission.current.get(queueKey),fingerprint=queueDraftFingerprint(draft),attachment=selectedSkill??draft.guide;
+  const previousId=prior&&prior.draft.entry===draft.entry&&prior.draft.revision===draft.revision&&prior.fingerprint===fingerprint?
+   prior.id:readQueueAdmission(()=>localStorage,queueKey,fingerprint);
   const id=previousId??crypto.randomUUID();
   const item:QueueMessageInput={id,text:draft.text.trim()?draft.text:'',context,planningMode:planningRef.current,newWorkflow,
    ...(modelRef.current?{model:modelRef.current}:{}),...(effortRef.current?{effort:effortRef.current}:{}),
-   ...(skill?{skill:'path' in skill?{name:skill.name,path:skill.path!}:{name:skill.name,functionId:skill.functionId}}:{}),
+   ...(attachment?{skill:'path' in attachment?{name:attachment.name,path:attachment.path!}:{name:attachment.name,functionId:attachment.functionId}}:{}),
    ...(draft.files.length?{files:draft.files}:{}),
   };
-  const admission={draft,id,pending:true};
+  const admission={draft,id,pending:true,fingerprint};
   rememberQueueAdmission(()=>localStorage,queueKey,id,fingerprint);
   queueAdmission.current.set(queueKey,admission);refreshFollowUps();
   try{
@@ -1034,7 +1051,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
    if(!mounted.current)return;
    drafts.acknowledge(draft);
    forgetQueueAdmission(()=>localStorage,queueKey,id);
-   if(skill)attachmentConsumedRef.current?.(skill.attachmentId);
+   if(attachment)attachmentConsumedRef.current?.(attachment.attachmentId);
    if(followUpCurrent()){
     setSendNotice('');setNewWorkflow(false);
    }
@@ -1086,7 +1103,9 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
   if(restoreText){
    if(readingFiles.current.has(drafts.capture().entry))return;
    try{
-    drafts.appendToDraft(provider,thread,item.text,item.files??[],{requireStorage:true});
+    const queuedGuide=item.skillFunctionId&&item.skillName?{attachmentId:crypto.randomUUID(),name:item.skillName,functionId:item.skillFunctionId,fromDraft:true as const}:undefined;
+    if(queuedGuide&&skill&&skill.functionId!==queuedGuide.functionId){setSendNotice(t('请先处理草稿中的指导，再移回排队消息。'));return;}
+    drafts.appendToDraft(provider,thread,item.text,item.files??[],{requireStorage:true,guide:queuedGuide});
     refreshFiles();
    }catch(error){queueError(error);return;}
   }
@@ -1319,7 +1338,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
      }}/>
    </div>:<Composer drafts={drafts} inputRef={composerInput} working={applying||connecting} onEdit={updatePrompt} onSend={sendFromComposer}
     sendDisabledReason={sendBlockedReason} prominent={composerProminent}
-    skillName={skill?.name} onClearSkill={()=>attachmentClearRef.current?.()} newWorkflow={newWorkflow}
+    skillName={skill?.name} onClearSkill={()=>{if(draftGuide)drafts.setGuide(undefined);if(selectedSkill)attachmentClearRef.current?.();}} newWorkflow={newWorkflow}
     attachments={{pickDisabled:historyHidden||composerUnbound,busy:fileImportBusy,imageMismatch:draftImageMismatch,
      onImport:files=>void importFiles(files),onPreview:showFile,onRemove:id=>{drafts.removeFile(id);refreshFiles();}}}
     followUp={queueComposer?{hint:queueHint,queueAllowed,onQueue:()=>void enqueuePrompt(),stopControl,
