@@ -23,7 +23,7 @@ export async function frontendDesignCases({check,out}) {
     const crowded=await sizes();
     assert.deepEqual(crowded.slice(0,2),[17,17]);
     await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
-    await dialog.getByText('设置已保存',{exact:true}).waitFor();
+    await page.getByTestId('settings-save-feedback').getByRole('status').filter({hasText:'设置已保存'}).waitFor();
     assert.equal(await page.evaluate(()=>window.__test.settings.minimumFontSize),17);
     await dialog.getByTestId('recommended-minimum-font').click();
     assert.deepEqual(await sizes(),defaults);

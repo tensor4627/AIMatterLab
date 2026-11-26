@@ -20,7 +20,7 @@ export async function frontendSshReloginCases({check,out}){
     if(method==='worker.request'&&data.method==='GET'&&data.target==='/api/clusters')return [];
     throw Error('Unexpected service-settings call '+method);
    };
-   function render(){window.testRoot.render(window.React.createElement(Settings,{profile,activeResource:{...ref,kind:'ssh-connection',status:'selected',authentication:'verified',capabilities:{service:{workflowReady:service.workflowReady}}},onChanged:render,onClose(){},onLogin(){throw Error('Unexpected new login');}}));}
+   function render(){window.renderWithProviders(window.React.createElement(Settings,{profile,activeResource:{...ref,kind:'ssh-connection',status:'selected',authentication:'verified',capabilities:{service:{workflowReady:service.workflowReady}}},onChanged:render,onClose(){},onLogin(){throw Error('Unexpected new login');}}));}
    render();
   });
   const before=page.getByTestId('ssh-service-check');await before.waitFor();
@@ -63,6 +63,16 @@ export async function frontendSshReloginCases({check,out}){
    render(props);
   });
   await page.getByTestId('ssh-worker-ready').waitFor();
+  const more=page.getByTestId('ssh-more');
+  await more.focus();
+  await page.getByRole('tooltip',{name:'更多'}).waitFor();
+  assert.equal(await more.getAttribute('aria-label'),'更多');
+  const hit=await more.boundingBox();
+  assert(hit.width>=28&&hit.height>=28);
+  await more.press('Enter');
+  await page.getByTestId('ssh-connection-close').waitFor();
+  await more.press('Escape');
+  await page.getByTestId('ssh-connection-close').waitFor({state:'hidden'});
   await page.evaluate(()=>{
    const f=window.__test;f.serviceReadRejected=true;
    f.events.forEach(listener=>listener({method:'studio/sshServiceChanged'}));

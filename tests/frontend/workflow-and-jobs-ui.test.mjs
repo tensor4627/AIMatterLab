@@ -1,4 +1,4 @@
-import {fixtureControlModule,frontendComponentLoader} from '../helpers/frontend-component-loader.mjs';
+import {fixtureControlModule,fixtureStateNode,fixtureStates,frontendComponentLoader} from '../helpers/frontend-component-loader.mjs';
 import __node_test, {describe as __describe} from 'node:test';
 import assert from "node:assert/strict";
 import {deploymentFixture, deploymentHarness} from "../helpers/deployment-diagnostic-hooks.mjs";
@@ -53,7 +53,7 @@ const test = __node_test;
 const code=ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/runs/JobsPage.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
 function harness(initial={}){
  const now=Date.now()/1000,states=[],actions=[];let cursor=0,tree;let props={local:[{id:'local-running',name:'Older local run',project_id:'other',status:'running',engine:'pydyn.md',created_at:now-60*86400},{id:'local-done',name:'Finished local run',project_id:'current',status:'succeeded',engine:'pydyn.md',created_at:now}],cluster:[{id:'cluster-queued',name:'Cluster waiting',project_id:'current',status:'queued',engine:'gpumd.md',created_at:now},{id:'cluster-unknown',name:'Unconfirmed cluster run',project_id:'current',status:'unknown',engine:'gpumd.md',created_at:now}],observations:{local:{at:now,loaded:true,stale:false},cluster:{at:now,loaded:true,stale:true}},projects:[{id:'current',name:'Current project'},{id:'other',name:'Other project'}],projectId:'current',tasks:[],conversations:[],worker:true,busy:false,onRefresh:()=>actions.push('refresh'),onOpen:job=>actions.push(['open',job.key]),onConversation:conversation=>actions.push(['conversation',conversation.id]),...initial};
- const jsx=(type,props)=>({type,props}),module={exports:{}},require=name=>fixtureControlModule(name)??(name==='react'?{useState:initial=>{const i=cursor++;states[i]??={value:typeof initial==='function'?initial():initial};return [states[i].value,value=>{states[i].value=typeof value==='function'?value(states[i].value):value;}];}}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='../../app/workspace-shell.mjs'?shell:name==='../../ui/i18n'?{t:value=>value}:name==='../../ui/Dialogs'?{Badge:'Badge',statusNames:{running:'运行中',queued:'排队中',unknown:'待核对',succeeded:'已完成'}}:new Proxy({default:name},{get:(object,key)=>object[key]??key}));
+ const jsx=fixtureStateNode,module={exports:{}},require=name=>name==='../../ui/States'?fixtureStates:fixtureControlModule(name)??(name==='react'?{useState:initial=>{const i=cursor++;states[i]??={value:typeof initial==='function'?initial():initial};return [states[i].value,value=>{states[i].value=typeof value==='function'?value(states[i].value):value;}];}}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==='../../app/workspace-shell.mjs'?shell:name==='../../ui/i18n'?{t:value=>value}:name==='../../ui/Dialogs'?{Badge:'Badge',statusNames:{running:'运行中',queued:'排队中',unknown:'待核对',succeeded:'已完成'}}:new Proxy({default:name},{get:(object,key)=>object[key]??key}));
  new Function('require','module','exports',code)(require,module,module.exports);
  const all=node=>Array.isArray(node)?node.flatMap(all):node&&typeof node==='object'?[node,...all(node.props?.children)]:[];
  const text=node=>Array.isArray(node)?node.map(text).join(''):node&&typeof node==='object'?text(node.props?.children):node==null||typeof node==='boolean'?'':String(node);
@@ -97,8 +97,8 @@ test('Jobs sync tooltip uses the actual button while offline/paused observations
  let refreshes=0;
  for(const connected of [false,true]){
   const tree=module.exports.default({local:[],cluster:[],observations:{local:{loaded:true,stale:true,paused:true,at:123},cluster:{loaded:false,stale:false,at:null}},projects:[],projectId:'',tasks:[],conversations:[],worker:connected,busy:false,onRefresh:()=>refreshes++,onOpen(){},onConversation(){}});
-  const nodes=all(tree),tooltip=nodes.find(n=>n.type==='Tooltip');assert.equal(tooltip.props.asChild,true);
-  const button=tooltip.props.children;assert.equal(button.type,'button');assert.equal(button.props.disabled,!connected);if(connected)button.props.onClick();
+  const nodes=all(tree),button=nodes.find(n=>n.type==='button'&&n.props.tooltip);
+  assert.match(button.props.tooltip,/同步时间不代表/);assert.equal(button.props.disabled,!connected);if(connected)button.props.onClick();else assert.equal(button.props.disabledReason,'作业服务未连接');
   assert.equal(nodes.filter(n=>n.type==='button'&&text(n)==='同步记录').length,1);assert(!nodes.some(n=>n.props?.className==='jobs-scope'));
   const observation=nodes.find(n=>n.props?.['data-testid']==='job-observation-local');assert.match(text(observation),/自动同步已暂停/);assert.match(text(observation),/记录读取时间/);
  }

@@ -45,7 +45,8 @@ test('native choose cancellation has no inspection or registration side effect',
 
 test('inspection exposes definition and test coverage, while registration is a separate explicit action',async()=>{
  const h=toolPackagesHarness({records:[]});await h.flush();h.click('tool-package-choose');await h.flush();assert.match(h.text(node(h,'tool-package-candidate')),/定义检查通过；安装与功能测试未运行/);assert.match(h.text(node(h,'tool-package-candidate')),/Real child PID and supervisor receipt/);assert.equal(calls(h,'tools.packages.register').length,0);assert.equal(calls(h,'worker.request').length,0);
- h.click('登记此工具包');await h.flush();assert.equal(calls(h,'tools.packages.register').length,1);assert.deepEqual(calls(h,'tools.packages.register')[0].data,{package_root:h.data.candidate.package_root});assert.match(h.text(node(h,'tool-package-record')),/definition_checked/);assert.match(h.text(node(h,'tool-package-record')),/安装: not_run/);assert.equal(calls(h,'tools.configurations.plan').length,0);h.unmount();
+ const register=h.find(n=>n.type==='button'&&h.text(n)==='登记此工具包');assert.equal(register.props.variant,'primary');assert.equal(node(h,'tool-package-choose').props.variant,'secondary');
+ h.click('登记此工具包');await h.flush();assert.deepEqual(h.toasts,[{message:'工具定义已登记；安装和功能测试尚未运行。',severity:'success'}]);assert.equal(node(h,'tool-package-notice').props.announce,false);assert.equal(calls(h,'tools.packages.register').length,1);assert.deepEqual(calls(h,'tools.packages.register')[0].data,{package_root:h.data.candidate.package_root});assert.match(h.text(node(h,'tool-package-record')),/definition_checked/);assert.match(h.text(node(h,'tool-package-record')),/安装: not_run/);assert.equal(calls(h,'tools.configurations.plan').length,0);h.unmount();
 });
 
 test('update and relocate submit the reviewed current revision and exact author root',async()=>{

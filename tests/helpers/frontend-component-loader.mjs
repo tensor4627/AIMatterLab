@@ -44,6 +44,16 @@ export function fixtureNotice({severity, announce, ...props}) {
  return {type:'div',props:{role,severity,...props}};
 }
 
+export const fixtureStates = {EmptyState:'EmptyState', ErrorState:'ErrorState', LoadingState:'LoadingState'};
+
+export function fixtureStateNode(type, props) {
+ if (type === 'LoadingState') return props.busy === false ? null : {type:'span',props:{...props,children:props.label}};
+ if (type === 'EmptyState' || type === 'ErrorState') {
+  return {type:'div',props:{...props,children:[props.title,props.body,props.retained,props.action,props.details]}};
+ }
+ return {type,props};
+}
+
 // Hook harnesses exercise the feature's state and IPC through its host controls.
 // Component tests cover the controls' DOM behavior independently.
 export function fixtureControlModule(name) {

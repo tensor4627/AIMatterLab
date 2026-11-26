@@ -44,7 +44,7 @@ export async function frontendPlanExperienceCases({check,out}){
   await dialog.getByRole('button',{name:'Agent',exact:true}).click();
   const mode=dialog.getByTestId('agent-approval-mode'),workspace=dialog.getByTestId('developer-compute-workspace');
   const save=dialog.getByRole('button',{name:'保存设置',exact:true});
-  const saved=dialog.getByText('设置已保存',{exact:true});
+  const saved=page.getByTestId('settings-save-feedback').getByRole('status').filter({hasText:'设置已保存'});
   const writes=()=>page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').map(c=>[c.data.agentApprovalMode,c.data.developerComputeWorkspaceId]));
   assert.equal(await mode.inputValue(),'manual');
   assert.equal(await workspace.count(),0);
@@ -82,7 +82,7 @@ export async function frontendPlanExperienceCases({check,out}){
   assert.equal(await dialog.getByTestId('developer-compute-workspace').inputValue(),'c'.repeat(64));
   await dialog.getByText('等待选定的 SSH 工作区重新连接',{exact:true}).waitFor({state:'attached'});
   await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
-  await dialog.getByText('设置已保存',{exact:true}).waitFor();
+  await page.getByTestId('settings-save-feedback').getByRole('status').filter({hasText:'设置已保存'}).waitFor();
   assert.equal(await page.evaluate(()=>window.__test.settings.developerComputeWorkspaceId),'c'.repeat(64));
   await noExecution(page);
  });
@@ -215,9 +215,9 @@ export async function frontendPlanExperienceCases({check,out}){
 
  await check('plan-experience-settings-preview-cancel-and-save',async page=>{
   await app(page);await page.getByRole('button',{name:'设置',exact:true}).click();const dialog=page.getByRole('dialog',{name:'工作台设置',exact:true});
-  await dialog.locator('select').first().selectOption('light');await dialog.getByRole('status').getByText('未保存修改',{exact:true}).waitFor();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+  await dialog.locator('select').first().selectOption('light');await dialog.locator('.settings-footer').getByText('未保存修改',{exact:true}).waitFor();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
   await dialog.getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
-  await page.getByRole('button',{name:'设置',exact:true}).click();await dialog.locator('select').first().selectOption('light');await dialog.getByRole('button',{name:'保存设置',exact:true}).click();await dialog.getByText('设置已保存',{exact:true}).waitFor();await dialog.getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+  await page.getByRole('button',{name:'设置',exact:true}).click();await dialog.locator('select').first().selectOption('light');await dialog.getByRole('button',{name:'保存设置',exact:true}).click();await page.getByTestId('settings-save-feedback').waitFor();await dialog.getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
   await noExecution(page);
  });
 }

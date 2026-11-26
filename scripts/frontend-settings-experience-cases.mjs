@@ -92,7 +92,7 @@ export async function frontendSettingsExperienceCases({check,out}){
   assert.equal(await page.evaluate(()=>!!window.__test.savedCluster),false);
   await limit.fill('0');
   await page.getByRole('button',{name:'保存连接',exact:true}).click();
-  await page.getByText('连接已保存；项目授权未改变。',{exact:true}).waitFor();
+  await page.getByTestId('toast-region').getByText('连接已保存；项目授权未改变。',{exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.__test.savedCluster.limits),{cpus:64,gpus:0,memory_mb:262144});
  });
  await check('third-settings-empty-port-stays-blank-until-valid-save',async page=>{
@@ -105,8 +105,12 @@ export async function frontendSettingsExperienceCases({check,out}){
   await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').length),0);
   await dialog.getByRole('alert').filter({hasText:'作业服务端口须为'}).waitFor();assert.equal(await port.getAttribute('aria-invalid'),'true');
-  await port.fill('19191');await dialog.getByRole('button',{name:'保存设置',exact:true}).click();
+  await port.fill('19191');await dialog.getByRole('button',{name:'保存设置',exact:true}).press('Enter');
   await page.waitForFunction(()=>window.__test.settings.workerPort===19191);
+  const toast=page.getByTestId('settings-save-feedback');
+  await toast.getByRole('status').filter({hasText:'设置已保存'}).waitFor();
+  assert.equal(await toast.getAttribute('data-toast-severity'),'success');
+  assert.equal(await dialog.locator('.settings-footer').getByText('设置已保存',{exact:true}).count(),0);
   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.method==='settings').length),1);
  });
  await check('experience-settings-storage-denied-language-preview-and-cancel',async page=>{
@@ -174,6 +178,6 @@ export async function frontendSettingsExperienceCases({check,out}){
  });
  await check('experience-settings-file-download-cancel-error-success',async page=>{
   await files(page);await preview(page);await page.getByRole('button',{name:'下载文件',exact:true}).click();await page.waitForFunction(()=>window.__settingsFixture.calls.some(c=>c.method==='cluster.download'));assert.equal(await page.getByText('文件已下载并通过 SHA256 核对',{exact:true}).count(),0);
-  await page.evaluate(()=>window.__settingsFixture.downloadMode='error');await page.getByRole('button',{name:'下载文件',exact:true}).click();await page.getByRole('alert').getByText('Synthetic download error',{exact:true}).waitFor();await page.evaluate(()=>window.__settingsFixture.downloadMode='pending');await page.getByRole('button',{name:'下载文件',exact:true}).click();await page.waitForFunction(()=>typeof window.__settingsFixture.finishDownload==='function');assert.equal(await page.getByRole('button',{name:'正在准备下载…',exact:true}).isDisabled(),true);await snapshot(page,'remote-download-pending');await page.evaluate(()=>window.__settingsFixture.finishDownload({bytes:9,sha256:'a'.repeat(64)}));await page.getByText('文件已下载并通过 SHA256 核对',{exact:true}).waitFor();const downloads=await page.evaluate(()=>window.__settingsFixture.calls.filter(c=>c.method==='cluster.download').map(c=>c.data));assert.equal(downloads.length,3);assert(downloads.every(data=>data.cluster_id==='cluster-a'&&data.relative==='a.xyz'&&data.expected_sha256==='a'.repeat(64)));await noRuns(page);
+  await page.evaluate(()=>window.__settingsFixture.downloadMode='error');await page.getByRole('button',{name:'下载文件',exact:true}).click();await page.getByRole('alert').getByText('Synthetic download error',{exact:true}).waitFor();await page.evaluate(()=>window.__settingsFixture.downloadMode='pending');await page.getByRole('button',{name:'下载文件',exact:true}).click();await page.waitForFunction(()=>typeof window.__settingsFixture.finishDownload==='function');assert.equal(await page.getByRole('button',{name:'正在准备下载…',exact:true}).isDisabled(),true);await snapshot(page,'remote-download-pending');await page.evaluate(()=>window.__settingsFixture.finishDownload({bytes:9,sha256:'a'.repeat(64)}));await page.getByTestId('toast-region').getByText('文件已下载并通过 SHA256 核对',{exact:true}).waitFor();const downloads=await page.evaluate(()=>window.__settingsFixture.calls.filter(c=>c.method==='cluster.download').map(c=>c.data));assert.equal(downloads.length,3);assert(downloads.every(data=>data.cluster_id==='cluster-a'&&data.relative==='a.xyz'&&data.expected_sha256==='a'.repeat(64)));await noRuns(page);
  });
 }

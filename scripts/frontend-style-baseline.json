@@ -4,6 +4,8 @@
   "browserDialogs": 0,
   "inlineNotices": 0,
   "bareAlerts": 0,
+  "bareStatuses": 0,
+  "rawDisclosures": 0,
   "unnamedIconButtons": 0,
   "buttonTitles": 0,
   "pixelFontSizes": 0,

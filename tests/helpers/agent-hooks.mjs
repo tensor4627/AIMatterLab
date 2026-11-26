@@ -48,7 +48,7 @@ export function appConversationRecorder(storage){
  return {onConversation,selectedConversationRef,selections,rows};
 }
 export function agentHarness({storage=memoryStorage(),props={},override}={}){
- const hooks=[],pending=[],events=[],calls=[],errors=[],conversations=[],intervals=new Map();let cursor=0,dirty=false,tree,currentProps,disposed=false,nextInterval=0;
+ const hooks=[],pending=[],events=[],calls=[],errors=[],conversations=[],toasts=[],intervals=new Map();let cursor=0,dirty=false,tree,currentProps,disposed=false,nextInterval=0;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useId=()=>`agent-fixture-${cursor++}`;
@@ -92,6 +92,13 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
    new Function('require','module','exports',compiled)(require,notice,notice.exports);return notice.exports;
   }
   if(name==='../../ui/Disclosure')return {default:fixtureDisclosure};
+  if(name==='../../ui/Toast')return {useToast:()=>({show:options=>toasts.push(options),dismiss(){}})};
+  if(name==='../../ui/States')return {
+   LoadingState:props=>({type:'span',props:{...props,children:props.label}}),
+   ErrorState:({title,retained,action,details,detailsSummary,detailsTestId,...props})=>({type:'div',props:{...props,children:[
+    title,retained,action,details&&fixtureDisclosure({summary:detailsSummary,children:details,'data-testid':detailsTestId}),
+   ]}}),
+  };
   const control=fixtureControlModule(name);if(control)return control;
   if(name==='../../../contracts/agent/codex-version.mjs')return codexVersion;
   if(name==='../../../contracts/agent/transcript-sanitizer.mjs')return transcript;
@@ -125,5 +132,5 @@ export function agentHarness({storage=memoryStorage(),props={},override}={}){
  function emit(event){for(const listener of [...events])listener(event);}
  function tick(){for(const callback of [...intervals.values()])callback();}
  function unmount(){disposed=true;for(const hook of hooks)hook?.cleanup?.();}
- render();return {render,flush,type,click,send,emit,tick,unmount,find,textarea,storage,calls,errors,conversations};
+ render();return {render,flush,type,click,send,emit,tick,unmount,find,textarea,storage,calls,errors,conversations,toasts};
 }

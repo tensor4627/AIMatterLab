@@ -17,6 +17,7 @@ import * as selectedServiceRecords from '../../frontend/features/runs/selected-s
 
 import {memoryStorage} from './agent-hooks.mjs';
 import {loadConversationSelection} from './conversation-selection-hooks.mjs';
+import {fixtureStateNode,fixtureStates} from './frontend-component-loader.mjs';
 const source=fs.readFileSync(new URL('../../frontend/app/App.tsx',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const connectionUi={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(new URL('../../frontend/features/compute/ssh-connection-types.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(connectionUi,connectionUi.exports);
@@ -44,7 +45,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   if(method==='worker.status')return {status:'connected',checkedAt:1};
   if(method==='worker.restore')return {status:'connected',...data,checkedAt:1};
   if(method==='conversation.select'&&data?.new===true)return {fresh:true};
-  if(method==='worker.connect')return {};
+  if(method==='worker.connect'||method==='compute.managed.refresh')return {};
   if(method==='settings')return {...settings,...data};
   if(method==='worker.request')return [];
   throw Error('Unexpected App fixture call '+method+' '+JSON.stringify(data));
@@ -69,6 +70,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   if(name==='../ui/Toast')return {useToast:()=>toast};
   if(name==='../ui/StatusBadge')return {statusLabel:value=>value};
   if(name==='../ui/Button')return {default:'button'};
+  if(name==='../ui/States')return fixtureStates;
   if(name==='../features/settings/appearance-defaults')return {recommendedMinimumFontSize:13};
   if(name==='./workspace-shortcuts')return {shortcutLabel:value=>value};
   if(name==='./useWorkspaceLayout')return layout.exports;
@@ -83,7 +85,7 @@ export function appWorkerHarness({override,storage=memoryStorage(),width=1440,ma
   if(name==='react')return {useState,useRef,useEffect};
   if(name==='../api/compute-resources')return loadNavigation('frontend/api/compute-resources.ts');
   if(name==='../api/conversation-history')return {hasConversationHistory:()=>window.studio?.conversationHistory===true};
-  if(name==='react/jsx-runtime')return {jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props}),Fragment:'fragment'};
+  if(name==='react/jsx-runtime')return {jsx:fixtureStateNode,jsxs:fixtureStateNode,Fragment:'fragment'};
   if(name==="../features/compute/useManagedResources")return {useManagedResources:()=>({resources:managedResources,conversations:managedConversations,sources:[]})};
   if(name==="../features/conversations/useConversationActivity")return {useConversationActivity:()=>[],nextConversationAttention:()=>undefined,activityKey:({provider,threadId})=>provider+':'+threadId};
   if(name==='../features/conversations/EvidenceSelection')return {EvidenceConversation:{Provider:'EvidenceConversation.Provider'},EvidenceSelection:'EvidenceSelection'};

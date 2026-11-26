@@ -19,6 +19,8 @@ const metrics = {
   browserDialogs: 0,
   inlineNotices: 0,
   bareAlerts: 0,
+  bareStatuses: 0,
+  rawDisclosures: 0,
   unnamedIconButtons: 0,
   buttonTitles: 0,
   pixelFontSizes: 0,
@@ -80,10 +82,11 @@ function checkSource(path, source) {
       const tag = node.tagName.getText();
       const attrs = attributes(node);
       const classes = attributeText(attrs.get('className'));
+      const role = attributeText(attrs.get('role')).replace(/^['"]|['"]$/g, '');
       if (/(?:^|[\s'"`])notice(?=$|[\s'"`])/.test(classes)) metrics.inlineNotices += 1;
-      if (tag === 'p' && attributeText(attrs.get('role')).replace(/^['"]|['"]$/g, '') === 'alert') {
-        metrics.bareAlerts += 1;
-      }
+      if (tag === 'p' && role === 'alert') metrics.bareAlerts += 1;
+      if (tag === 'p' && role === 'status') metrics.bareStatuses += 1;
+      if ((tag === 'details' || tag === 'summary') && path !== 'ui/Disclosure.tsx') metrics.rawDisclosures += 1;
       if (tag === 'button' || tag === 'Button') {
         if (attrs.has('title')) metrics.buttonTitles += 1;
         const icon = /(?:^|[\s'"`])icon-button(?=$|[\s'"`])/.test(classes)

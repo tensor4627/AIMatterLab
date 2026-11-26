@@ -164,7 +164,7 @@ for(const provider of ['codex','deepseek','qwen','compatible']){
    h.type('New draft after submitting steer');gate.resolve({turnId:'turn-1'});await h.flush();
    assert.equal(h.textarea().props.value,'New draft after submitting steer');
    assert.equal(starts(h).length,1);
-   assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/引导已发送/);
+   assert.match(h.toasts.at(-1).message,/引导已发送/);
   }finally{h.unmount();}
  });
 }
@@ -336,7 +336,7 @@ test('a queued message pauses when its original send context changes',async()=>{
   assert.equal(starts(h).length,1);
   assert.match(JSON.stringify(find(h,'agent-follow-up-queue')),/发送环境已变化/);
   h.click('agent-resume-queue');await h.flush();
-  assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/Restore the original project or resource/);
+  assert.match(JSON.stringify(h.find(node=>node.props?.className?.split(' ').includes('agent-send-notice'))),/Restore the original project or resource/);
   assert.equal(starts(h).length,1);
  }finally{h.unmount();}
 });
@@ -380,7 +380,7 @@ test('failed native steering leaves the draft and makes no new turn or queued fa
   assert.equal(h.textarea().props.value,'Keep this text when not acknowledged');
   assert.equal(starts(h).length,1);
   assert.throws(()=>find(h,'agent-follow-up-queue'));
-  assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/引导结果待核对/);
+  assert.match(JSON.stringify(h.find(node=>node.props?.className?.split(' ').includes('agent-send-notice'))),/引导结果待核对/);
  }finally{h.unmount();}
 });
 
@@ -580,6 +580,6 @@ test('the steer shortcut racing an already completed reply keeps the draft and d
   assert.deepEqual(calls(h,'turn/steer'),[]);
   assert.equal(starts(h).length,1);
   assert.equal(h.textarea().props.value,'Hold on to this draft');
-  assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/当前回复无法接收引导/);
+  assert.match(JSON.stringify(h.find(node=>node.props?.className?.split(' ').includes('agent-send-notice'))),/当前回复无法接收引导/);
  }finally{h.unmount();}
 });

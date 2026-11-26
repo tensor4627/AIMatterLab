@@ -3,6 +3,34 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 export async function frontendModelProviderCases({check,out}){
+ await check('model-providers-list-loading-failure-retry-and-empty',async page=>{
+  await page.evaluate(()=>{
+   const invoke=window.studio.invoke;
+   window.__test.profileReads=0;
+   window.studio.invoke=(method,data)=>{
+    if(method!=='models.profiles.list')return invoke(method,data);
+    if(++window.__test.profileReads===1)return new Promise((resolve,reject)=>{
+     window.__test.failProfileRead=()=>reject(Error('Fixture profile read unavailable'));
+    });
+    return Promise.resolve([]);
+   };
+   return window.renderTest('ProviderLogin',{provider:'compatible',onClose(){},onConfigured(){},onError(){}});
+  });
+  const dialog=page.getByRole('dialog',{name:'模型与 API'});
+  await dialog.getByRole('status').filter({hasText:'正在读取服务商配置…'}).waitFor();
+  await page.evaluate(()=>window.__test.failProfileRead());
+  await dialog.getByRole('alert').filter({hasText:'无法读取服务商配置。'}).waitFor();
+  const details=dialog.locator('.aml-error-state summary');
+  assert.equal(await details.evaluate(el=>el.parentElement.open),false);
+  await details.press('Enter');
+  await dialog.locator('pre').filter({hasText:'Fixture profile read unavailable'}).waitFor();
+  const retry=dialog.getByRole('button',{name:'重新读取',exact:true});
+  assert.equal(await retry.getAttribute('data-variant'),'primary');
+  await retry.press('Enter');
+  await dialog.getByRole('heading',{name:'尚无服务商配置'}).waitFor();
+  assert.equal(await dialog.getByTestId('add-api-provider').getAttribute('data-variant'),'primary');
+  assert.equal(await page.evaluate(()=>window.__test.profileReads),2);
+ });
  for(const scenario of ['matched','missing-model','missing-effort']){
   await check('model-providers-codex-native-defaults-'+scenario,async page=>{
    await page.evaluate(async scenario=>{
@@ -111,8 +139,15 @@ export async function frontendModelProviderCases({check,out}){
   assert.equal(await page.evaluate(()=>window.selectedMode),'none');
   await account.getByRole('button',{name:'开始登录'}).click();
   await page.waitForFunction(()=>window.loginType==='chatgpt');
-  await account.getByRole('button',{name:'打开官方授权页面'}).waitFor();
-  await page.screenshot({path:path.join(out,'codex-fresh-install-login.png')});
+  const authorization=account.getByRole('button',{name:'打开官方授权页面',exact:true});
+  await authorization.waitFor();
+  assert.equal(await authorization.getAttribute('data-variant'),'primary');
+  assert.equal(await account.locator('[data-variant="primary"]:visible').count(),1);
+  const start=account.getByRole('button',{name:'开始登录',exact:true});
+  assert.equal(await start.getAttribute('data-variant'),'secondary');
+  assert(await start.isDisabled());
+  assert((await account.locator('.account-summary').boundingBox()).height<180);
+  await page.screenshot({path:path.join(out,'codex-fresh-install-login.png'),animations:'disabled'});
  });
  await check('model-providers-codex-config-without-env',async page=>{
   await page.evaluate(()=>{
@@ -297,11 +332,19 @@ export async function frontendModelProviderCases({check,out}){
     onConfigured:()=>fixture.configured++,onTested:()=>fixture.tested++,onError:()=>{}});
   });
   const dialog=page.getByRole('dialog').filter({has:exitButton(page)});
-  await dialog.getByTestId('add-api-provider').click();
+  assert.equal(await dialog.getByTestId('add-api-provider').getAttribute('data-variant'),'primary');
+  await dialog.getByTestId('add-api-provider').press('Enter');
+  const save=dialog.getByTestId('save-api-provider');
+  assert.equal(await save.getAttribute('aria-disabled'),'true');
+  await save.focus();
+  await page.getByRole('tooltip').filter({hasText:'请填写至少一个模型 ID。'}).waitFor();
   await dialog.getByTestId('provider-base-url').fill('https://fixture.invalid/v1');
   await dialog.getByTestId('provider-api-key').fill('synthetic-key');
   await dialog.getByTestId('api-model-id-0').fill('fixture-model');
   await dialog.getByTestId('save-api-provider').click();
+  const feedback=page.getByTestId('model-provider-feedback');
+  await feedback.getByRole('status').filter({hasText:'配置已保存'}).waitFor();
+  assert.equal(await feedback.getAttribute('data-toast-severity'),'success');
   await exitButton(page).and(page.getByRole('button',{name:'完成',exact:true})).waitFor();
   assert.equal(await dialog.getByTestId('provider-api-key').inputValue(),'');
   assert.equal(await dialog.getByText(/测试调用成功/).count(),0);
@@ -321,7 +364,7 @@ export async function frontendModelProviderCases({check,out}){
    assert(colors.contrast>=4.5);
    assert.equal(colors.visible,true,'the completion action is visible while the form can scroll');
    samples.push({theme,...colors});
-   await dialog.screenshot({path:path.join(out,'account-dialog-done-'+theme+'.png')});
+   await page.screenshot({path:path.join(out,'account-dialog-done-'+theme+'.png'),animations:'disabled'});
   }
   await fs.writeFile(path.join(out,'account-dialog-done-contrast.json'),JSON.stringify(samples,null,2)+'\n');
   await dialog.getByTestId('provider-base-url').fill('https://unsaved.invalid/v1');

@@ -34,12 +34,14 @@ import {frontendTerminalReadObservationCases} from './frontend-terminal-read-obs
 import {frontendClusterObservationCases} from './frontend-cluster-observation-cases.mjs';
 import {frontendClusterEnvironmentCases} from './frontend-cluster-environment-cases.mjs';
 import {frontendWorkerUpgradeCases} from './frontend-worker-upgrade-cases.mjs';
+import {frontendCompletionCases} from './frontend-completion-cases.mjs';
 let playwright;
 try{playwright=await import('playwright');}
 catch(error){const module=process.env.STUDIO_PLAYWRIGHT_MODULE||path.resolve(path.dirname(process.execPath),'../node_modules/playwright/index.mjs');try{playwright=await import(pathToFileURL(module).href);}catch{throw Error('Playwright is required for renderer checks. Set STUDIO_PLAYWRIGHT_MODULE to its index.mjs path.',{cause:error});}}
 const {chromium,_electron}=playwright;
 const native=process.env.STUDIO_FRONTEND_NATIVE==='1';
 const nativeHidden=process.env.STUDIO_FRONTEND_NATIVE_HIDDEN==='1';
+const nativeReuse=process.env.STUDIO_FRONTEND_NATIVE_REUSE==='1';
 if(native)requireLaunchContext();
 const out=path.resolve(process.env.STUDIO_FRONTEND_OUTPUT||'validation/local/frontend-regression');
 const relativeHarness=path.relative(process.cwd(),path.join(out,'harness.html'));
@@ -48,8 +50,9 @@ if(path.isAbsolute(relativeHarness)||harnessPath.startsWith('../'))throw Error('
 await fs.mkdir(out,{recursive:true});
 if(native)await fs.writeFile(path.join(out,'native-main.cjs'),`const {app,BrowserWindow}=require('electron');
 app.setPath('userData',process.env.STUDIO_FRONTEND_NATIVE_PROFILE);
-app.once('open-fixture',async()=>{await app.whenReady();const window=new BrowserWindow({show:process.env.STUDIO_FRONTEND_NATIVE_HIDDEN!=='1',width:1440,height:1000,useContentSize:true,title:'AIMatterLab frontend regression - isolated fixtures',webPreferences:{backgroundThrottling:process.env.STUDIO_FRONTEND_NATIVE_HIDDEN!=='1',sandbox:true,contextIsolation:true,nodeIntegration:false}});window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.session.setPermissionRequestHandler((_w,_p,callback)=>callback(false));window.loadURL('data:text/html,<title>AIMatterLab renderer fixture</title>');});
-app.on('window-all-closed',()=>app.quit());`);
+let fixture=0;
+app.on('open-fixture',async()=>{await app.whenReady();const window=new BrowserWindow({show:process.env.STUDIO_FRONTEND_NATIVE_HIDDEN!=='1',width:1440,height:1000,useContentSize:true,title:'AIMatterLab frontend regression - isolated fixtures',webPreferences:{partition:'isolated-fixture-'+(++fixture),backgroundThrottling:process.env.STUDIO_FRONTEND_NATIVE_HIDDEN!=='1',sandbox:true,contextIsolation:true,nodeIntegration:false}});window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.session.setPermissionRequestHandler((_w,_p,callback)=>callback(false));window.loadURL('data:text/html,<title>AIMatterLab renderer fixture</title>');});
+app.on('window-all-closed',()=>{if(process.env.STUDIO_FRONTEND_NATIVE_REUSE!=='1')app.quit();});`);
 await fs.writeFile(path.join(out,'harness.html'),`<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
 import '/frontend/app/style.css';import '/frontend/features/workflows/task-flow.css';import React from 'react';import {createRoot} from 'react-dom/client';import {ConfirmProvider} from '/frontend/ui/ConfirmDialog.tsx';import {ToastProvider} from '/frontend/ui/Toast.tsx';import * as echarts from 'echarts';
 window.testChart=host=>echarts.getInstanceByDom(host);
@@ -73,18 +76,25 @@ const traceAppRender={
 const server=await createServer({plugins:[traceAppRender],cacheDir:path.join(out,'vite-cache'),optimizeDeps:{entries:[path.resolve(out,'harness.html')]},server:{port:0,strictPort:false,host:'127.0.0.1',watch:{ignored:()=>true},hmr:false}});await server.listen();
 const base=`http://127.0.0.1:${server.httpServer.address().port}`;
 const nativeApplications=new Set();
-let browser;try{browser=native?{newContext:async()=>{
+let reusableApplication;
+async function launchNative(){
  const profile=await fs.mkdtemp(path.join(out,'native-profile-'));
  const application=await _electron.launch({args:[path.join(out,'native-main.cjs')],env:{...process.env,STUDIO_FRONTEND_NATIVE_PROFILE:profile},timeout:30000});
  nativeApplications.add(application);
- const close=async()=>{try{await application.close();}finally{nativeApplications.delete(application);}};
+ application.on('close',()=>{nativeApplications.delete(application);if(reusableApplication===application)reusableApplication=undefined;});
+ return application;
+}
+let browser;try{browser=native?{newContext:async()=>{
+ const application=nativeReuse?(reusableApplication??=await launchNative()):await launchNative();
+ const close=()=>nativeReuse
+  ?application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(window=>window.destroy()))
+  :application.close();
  try{
   // Attach the driver before creating a renderer, even on a cold Vite startup.
-  await application.evaluate(({app})=>app.emit('open-fixture'));
-  const page=await application.firstWindow({timeout:20000});
+  const [page]=await Promise.all([application.waitForEvent('window',{timeout:20000}),application.evaluate(({app})=>app.emit('open-fixture'))]);
   await page.setViewportSize({width:1440,height:1000});
   return {newPage:async()=>page,close,application};
- }catch(error){await close();throw error;}
+ }catch(error){await close().catch(()=>{});throw error;}
 },close:async()=>{await Promise.allSettled([...nativeApplications].map(application=>application.close()));nativeApplications.clear();}}:await chromium.launch({channel:process.env.STUDIO_BROWSER_CHANNEL||'msedge',headless:true});}catch(error){await server.close();throw error;}
 const results=[];
 async function fixture(){
@@ -208,6 +218,7 @@ async function renderGatedWorkerStartup(p){
 }
 try{
  await frontendAppearanceCases({check,out});
+ await frontendCompletionCases({check,connectWorker,openProjectManagement});
  await check('aimatterlab-brand-native-experience',async p=>{
   await p.evaluate(()=>window.renderTest('App'));
   await p.locator('.titlebar .brand strong').waitFor();
@@ -638,7 +649,7 @@ try{
   await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>{if(method==='workspace.create'){window.__test.workspaceCreated=data;return {};}return original(method,data);};return window.renderTest('WorkspacePanel',{task:{id:'workspace-test',workspaceChoice:'pending',parameters:{files:[]},authoring:{pendingInputs:['/synthetic/structure.xyz']}},worker:true,busy:false,onRefresh:()=>{},onError:e=>{throw e;}});});await p.getByTestId('workspace-choice').waitFor();assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.method==='workspace.import'||c.method==='workspace.create')),false);await p.getByRole('button',{name:'新建工作区',exact:true}).click();await p.getByLabel('工作区名称',{exact:true}).fill('Named workspace');await p.getByLabel('资产导入方式',{exact:true}).selectOption('link');await p.getByRole('button',{name:'创建并使用工作区',exact:true}).click();await p.waitForFunction(()=>window.__test.workspaceCreated);const request=await p.evaluate(()=>window.__test.workspaceCreated);assert.equal(request.taskId,'workspace-test');assert.equal(request.name,'Named workspace');assert.equal(request.mode,'link');assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.method==='task.execute')),false);
  });
  await check('workspace-existing-selection-and-draft-option-are-explicit',async p=>{
-await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>{if(method==='workspace.list')return {status:'ready',taskId:data.taskId,workspaces:[{id:'workspace-existing',name:'Existing workspace'}]};if(['workspace.select','workspace.keepDraft'].includes(method)){window.__test.workspaceAction={method,data};return {};}return original(method,data);};return window.renderTest('WorkspacePanel',{task:{id:'select-test',workspaceChoice:'pending',parameters:{}},worker:true,busy:false,onRefresh:()=>{},onError:e=>{throw e;}});});await p.getByText('可先将指定的输入复制到当前草稿，也可以选择一个工作区保存副本。',{exact:true}).waitFor();await p.getByLabel('已有工作区',{exact:true}).selectOption('workspace-existing');await p.getByRole('button',{name:'使用此工作区',exact:true}).click();await p.waitForFunction(()=>window.__test.workspaceAction);assert.deepEqual(await p.evaluate(()=>window.__test.workspaceAction),{method:'workspace.select',data:{taskId:'select-test',workspaceId:'workspace-existing'}});await p.getByRole('button',{name:'沿用草稿目录',exact:true}).click();await p.waitForFunction(()=>window.__test.workspaceAction.method==='workspace.keepDraft');
+await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>{if(method==='workspace.list')return {status:'ready',taskId:data.taskId,workspaces:[{id:'workspace-existing',name:'Existing workspace'}]};if(['workspace.select','workspace.keepDraft'].includes(method)){window.__test.workspaceAction={method,data};return {};}return original(method,data);};return window.renderTest('WorkspacePanel',{task:{id:'select-test',workspaceChoice:'pending',parameters:{}},worker:true,busy:false,onRefresh:()=>{},onError:e=>{throw e;}});});await p.getByTestId('workspace-choice').locator('summary').filter({hasText:'选择工作区'}).focus();await p.getByRole('tooltip').filter({hasText:'可先将指定的输入复制到当前草稿，也可以选择一个工作区保存副本。'}).waitFor();await p.getByLabel('已有工作区',{exact:true}).selectOption('workspace-existing');await p.getByRole('button',{name:'使用此工作区',exact:true}).click();await p.waitForFunction(()=>window.__test.workspaceAction);assert.deepEqual(await p.evaluate(()=>window.__test.workspaceAction),{method:'workspace.select',data:{taskId:'select-test',workspaceId:'workspace-existing'}});await p.getByRole('button',{name:'沿用草稿目录',exact:true}).click();await p.waitForFunction(()=>window.__test.workspaceAction.method==='workspace.keepDraft');
  });
  await check('workspace-external-input-copy-receipt-in-draft',async p=>{
   const source='~/input/structures/model.xyz',destination='/worker/projects/draft/inputs/import-'+'b'.repeat(64)+'/model.xyz',sha='a'.repeat(64);
@@ -1282,7 +1293,8 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
  await check('compute-authorization-form-is-explicit-validates-and-syncs-json',async p=>{
   await p.evaluate(()=>window.renderTest('ProjectAuthorizationForm',{environments:[window.__test.environment],suggestedInputRoot:'/fixture/draft/inputs',onSubmit:async value=>window.__test.authorization=value}));
   const implemented=await p.evaluate(async()=>(await import('/frontend/ui/presentation/engines.ts')).engines.map(([id])=>id));
-  assert.equal(await p.getByTestId('project-tools-details').getAttribute('open'),null);assert.equal(await p.getByTestId('project-resource-details').getAttribute('open'),null);assert.equal(await p.getByLabel('GPU 编号',{exact:true}).inputValue(),'0');assert.equal(await p.getByLabel('计算环境',{exact:true}).inputValue(),'env');assert.equal(await p.getByLabel('输入目录',{exact:true}).inputValue(),'/fixture/draft/inputs');assert.equal(await p.getByTestId('project-tools-details').locator('input:checked').count(),implemented.length);assert.match(await p.getByTestId('project-resource-summary').innerText(),/GPU 0[\s\S]*3600 s[\s\S]*1/);
+  assert.equal(await p.getByTestId('project-tools-details').getAttribute('open'),null);assert.equal(await p.getByTestId('project-resource-details').getAttribute('open'),null);assert.equal(await p.getByLabel('GPU 编号',{exact:true}).inputValue(),'0');assert.equal(await p.getByLabel('计算环境',{exact:true}).inputValue(),'env');assert.equal(await p.getByLabel('输入目录',{exact:true}).inputValue(),'/fixture/draft/inputs');assert.equal(await p.getByTestId('project-tools-details').locator('input:checked').count(),implemented.length);
+  const summary=p.getByTestId('project-resource-summary');assert.deepEqual(await summary.locator('dt').allTextContents(),['GPU','时长上限 · s','最大并发数']);assert.deepEqual(await summary.locator('dd').allTextContents(),['0','3600','1']);
   await p.getByLabel('输入目录',{exact:true}).fill('');await p.getByTestId('save-project-authorization').click();assert.equal(await p.evaluate(()=>!!window.__test.authorization),false);assert.match(await p.locator('[data-testid=project-authorization]').innerText(),/Linux 绝对/);
   await p.getByLabel('项目名称',{exact:true}).fill('Bounded compute');await p.getByRole('button',{name:'使用当前流程输入目录',exact:true}).click();
   await p.locator('.authorization-json summary').click();await p.waitForFunction(()=>document.querySelector('.authorization-json textarea')?.value.includes('Bounded compute'));await p.getByLabel('项目名称',{exact:true}).fill('Updated compute');await p.waitForFunction(()=>document.querySelector('.authorization-json textarea')?.value.includes('Updated compute'));
@@ -1416,7 +1428,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
   await p.evaluate(()=>{window.__test.settings.pygasSkillProviders=['codex'];return window.renderTest('SkillsWorkbench',{provider:'kimi',settings:window.__test.settings,onSaved:s=>window.__test.savedResources=s,onSelect:s=>window.__test.attachment=s,onError:e=>{throw e;}});});await p.getByLabel('查找任务或工具',{exact:true}).fill('analysis.wtmetad');const wt=p.locator('.skill-function').filter({hasText:'WTMetaD 重加权'});assert.equal(await wt.getByRole('button').isEnabled(),true);assert.match(await wt.locator('.skill-route-meta').innerText(),/AIMatterLab/);await wt.getByRole('button').click();assert.equal(await p.evaluate(()=>window.__test.attachment.functionId),'analysis.wtmetad');await p.getByLabel('查找任务或工具',{exact:true}).fill('analysis.opes');const route=p.locator('.skill-function').filter({hasText:'OPES 重加权'});assert.equal(await route.getByRole('button').isDisabled(),true);assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>['agent.connect','codex.rpc','agent.rpc'].includes(c.method))),false);await p.locator('.skill-config>summary').click();await p.locator('.skill-sharing-options').getByLabel('pyGAS',{exact:true}).check();assert.deepEqual(await p.evaluate(()=>window.__test.settings.pygasSkillProviders),['codex']);assert.equal(await p.locator('.skill-sharing-options').getByLabel('GPUMD',{exact:true}).isChecked(),false);await p.getByTestId('save-scientific-skills').click();await p.waitForFunction(()=>window.__test.settings.pygasSkillProviders.includes('kimi'));assert.deepEqual(await p.evaluate(()=>window.__test.settings.pygasSkillProviders),['codex','kimi']);assert.equal(await p.evaluate(()=>Object.keys(window.__test.settings.scientificSkillProviders||{}).length),0);await p.waitForFunction(()=>!document.querySelector('.skill-function button').disabled);await route.getByRole('button').click();const selection=await p.evaluate(()=>window.__test.attachment);assert.equal(selection.functionId,'analysis.opes');assert.equal(typeof selection.attachmentId,'string');assert.equal(selection.path,undefined);
  });
  await check('scientific-skills-partial-discovery-does-not-require-codex',async p=>{
-  await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='scientific.skills'?Promise.reject(Error('Synthetic map unavailable')):original(method,data);return window.renderTest('SkillsWorkbench',{provider:'deepseek',settings:window.__test.settings,onSaved:()=>{},onSelect:s=>window.__test.attachment=s,onError:()=>{}});});await p.getByRole('alert').filter({hasText:'Synthetic map unavailable'}).waitFor();await p.locator('.skill-local>summary').click();await p.locator('.skill-local').getByRole('button',{name:'用于下条消息',exact:true}).click();assert.equal(await p.evaluate(()=>window.__test.attachment.path),'/fixture/skills/public/SKILL.md');assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.method==='agent.rpc'||c.method==='codex.rpc')),false);
+  await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='scientific.skills'?Promise.reject(Error('Synthetic map unavailable')):original(method,data);return window.renderTest('SkillsWorkbench',{provider:'deepseek',settings:window.__test.settings,onSaved:()=>{},onSelect:s=>window.__test.attachment=s,onError:()=>{}});});const fault=p.locator('.aml-error-state').filter({hasText:'暂时无法读取全部科学资源'});await fault.getByRole('alert').waitFor();await fault.locator('summary').click();await fault.getByText(/Synthetic map unavailable/).waitFor();await p.locator('.skill-local>summary').click();await p.locator('.skill-local').getByRole('button',{name:'用于下条消息',exact:true}).click();assert.equal(await p.evaluate(()=>window.__test.attachment.path),'/fixture/skills/public/SKILL.md');assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.method==='agent.rpc'||c.method==='codex.rpc')),false);
  });
  await check('scientific-skills-settings-single-navigation-owner',async p=>{
   await p.evaluate(()=>window.renderTest('App'));await p.getByRole('button',{name:'设置',exact:true}).click();const dialog=p.getByRole('dialog');await dialog.locator('.settings-nav button').filter({hasText:'科学资源与技能'}).click();assert.equal(await dialog.locator('textarea').count(),0);await dialog.getByRole('button',{name:'打开科学资源与技能',exact:true}).click();await p.getByTestId('skills-workbench').waitFor();assert.equal(await p.getByRole('dialog').count(),0);assert.equal(await p.evaluate(()=>localStorage.getItem('studio.section')),'skills');assert.equal(await p.evaluate(()=>window.__test.calls.some(c=>c.method==='codex.rpc')),false);
@@ -1449,7 +1461,9 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
  });
 
  for(const malformed of [{schema_version:1,functions:{}},{schema_version:1,functions:[{id:'broken-route'}]}])await check('scientific-skills-fulfilled-malformed-catalog-'+(Array.isArray(malformed.functions)?'row':'collection'),async p=>{
-  await p.evaluate(malformed=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='scientific.skills'?malformed:original(method,data);return window.renderTest('SkillsWorkbench',{provider:'kimi',settings:window.__test.settings,onSaved:()=>{},onSelect:()=>{},onError:e=>{throw e;}});},malformed);await p.getByRole('alert').filter({hasText:'功能目录格式无效'}).waitFor();assert.equal(await p.getByTestId('skills-workbench').isVisible(),true);await p.locator('.skill-local>summary').click();assert.equal(await p.locator('.skill-local .skill-function').count(),1);assert.equal(await p.getByRole('button',{name:'刷新资源',exact:true}).isEnabled(),true);
+  await p.evaluate(malformed=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>method==='scientific.skills'?malformed:original(method,data);return window.renderTest('SkillsWorkbench',{provider:'kimi',settings:window.__test.settings,onSaved:()=>{},onSelect:()=>{},onError:e=>{throw e;}});},malformed);
+  const failure=p.locator('.aml-error-state').filter({hasText:'暂时无法读取全部科学资源'});await failure.getByRole('alert').waitFor();await failure.locator('summary').click();await failure.getByText(/功能目录格式无效/).waitFor();
+  assert.equal(await p.getByTestId('skills-workbench').isVisible(),true);await p.locator('.skill-local>summary').click();assert.equal(await p.locator('.skill-local .skill-function').count(),1);assert.equal(await p.getByRole('button',{name:'刷新资源',exact:true}).isEnabled(),true);
  });
  await check('scientific-sharing-late-save-cannot-retarget-provider-or-overwrite-latest-state',async p=>{
   await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=async(method,data)=>{if(method==='settings'&&data.scientificSkillProviders){const saved={...window.__test.settings,...data};window.__test.settings=saved;window.__test.sharedPatch=structuredClone(data);return new Promise(resolve=>window.__test.releaseScopeSave=()=>resolve(saved));}return original(method,data);};localStorage.setItem('studio.section','skills');return window.renderTest('App');});await p.locator('.skill-config>summary').click();await p.locator('.skill-sharing-options').getByLabel('GPUMD',{exact:true}).check();await p.getByTestId('save-scientific-skills').click();await p.waitForFunction(()=>typeof window.__test.releaseScopeSave==='function');await openAgentOptions(p);await p.getByTestId('agent-provider').selectOption('kimi');await p.waitForFunction(()=>window.__test.settings.agentProvider==='kimi');await p.evaluate(()=>window.__test.releaseScopeSave());await p.waitForFunction(()=>!document.querySelector('[data-testid=save-scientific-skills]').disabled||document.querySelector('[data-testid=save-scientific-skills]').textContent.includes('保存资源设置'));assert.deepEqual(await p.evaluate(()=>window.__test.sharedPatch.scientificSkillProviders),{gpumd:['codex']});assert.equal(await p.evaluate(()=>window.__test.settings.agentProvider),'kimi');assert.equal(await p.getByTestId('agent-provider').inputValue(),'kimi');await p.waitForFunction(()=>document.querySelector('.skill-automatic')?.textContent.includes('kimi'));assert.equal(await p.locator('.skill-config select').inputValue(),'kimi');assert.equal(await p.locator('.skill-sharing-options').getByLabel('GPUMD',{exact:true}).isChecked(),false);
@@ -1460,7 +1474,7 @@ await p.evaluate(()=>{const original=window.studio.invoke;window.studio.invoke=a
  });
 }finally{
  try{await browser.close();}finally{await server.close();}
- const scope=native?'Electron renderer and input interactions with synthetic IPC and isolated profiles.':'Browser renderer regression with synthetic IPC.';
+ const scope=native?'Electron renderer and input interactions with synthetic IPC and isolated sessions.':'Browser renderer regression with synthetic IPC.';
  await fs.writeFile(path.join(out,'results.json'),JSON.stringify({mode:native?'native-electron':'browser',scope,checks:results},null,2)+'\n');
 }
 console.log(JSON.stringify(results,null,2));if(!results.length){console.error('No renderer cases matched STUDIO_FRONTEND_FILTER');process.exitCode=1;}else if(results.some(r=>r.status==='failed'))process.exitCode=1;

@@ -16,9 +16,10 @@ test('a missing runtime presents choices without downloading, choosing a file is
 test('explicit installation is single flight and displays only its real progress before readiness',async()=>{
  const gate=deferred(),h=setup(method=>method==='agent.cli.install'?gate.promise:undefined);
  try{await h.flush();const click=h.byId('cli-download').props.onClick;click();click();await h.flush();assert.equal(h.calls.filter(call=>call.method==='agent.cli.install').length,1);assert(h.byId('cli-download').props.disabled);const ticket=h.calls[0].data;
-  emit(h,{...ticket,requestId:'other',phase:'downloading',receivedBytes:999,totalBytes:1000,packageIndex:1,packageCount:1});await h.flush();assert.equal(h.find(node=>node.type==='LoadingFeedback').props.progress,undefined);
-  emit(h,{...ticket,phase:'downloading',receivedBytes:30,totalBytes:100,packageIndex:1,packageCount:2});await h.flush();assert.deepEqual(h.find(node=>node.type==='LoadingFeedback').props.progress,{completed:30,total:100});assert.match(h.text(),/1 \/ 2/);assert.deepEqual(h.completed,[]);
-  emit(h,{...ticket,phase:'verifying',receivedBytes:100,totalBytes:100,packageIndex:1,packageCount:2});await h.flush();assert.equal(h.find(node=>node.type==='LoadingFeedback').props.label,'正在校验下载内容');gate.resolve(ready('kimi'));await h.flush();assert.deepEqual(h.completed,[ready('kimi')]);assert.equal(h.byId('cli-download').props.disabled,false);
+  const progress=()=>h.find(node=>node.type==='span'&&node.props.busy);
+  emit(h,{...ticket,requestId:'other',phase:'downloading',receivedBytes:999,totalBytes:1000,packageIndex:1,packageCount:1});await h.flush();assert.equal(progress().props.progress,undefined);
+  emit(h,{...ticket,phase:'downloading',receivedBytes:30,totalBytes:100,packageIndex:1,packageCount:2});await h.flush();assert.deepEqual(progress().props.progress,{completed:30,total:100});assert.match(h.text(),/1 \/ 2/);assert.deepEqual(h.completed,[]);
+  emit(h,{...ticket,phase:'verifying',receivedBytes:100,totalBytes:100,packageIndex:1,packageCount:2});await h.flush();assert.equal(progress().props.label,'正在校验下载内容');gate.resolve(ready('kimi'));await h.flush();assert.deepEqual(h.completed,[ready('kimi')]);assert.equal(h.byId('cli-download').props.disabled,false);
  }finally{h.unmount();}
 });
 

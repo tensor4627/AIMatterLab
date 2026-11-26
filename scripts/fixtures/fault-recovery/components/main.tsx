@@ -1,5 +1,6 @@
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';
 import ViewBoundary from '@studio/ui/ViewBoundary';
+import {ToastProvider} from '@studio/ui/Toast';
 import WorkspacePanel from '@studio/features/workflows/WorkspacePanel';
 import ProjectAuthorizationForm from '@studio/features/compute/ProjectAuthorizationForm';
 import '@studio/app/style.css';
@@ -18,4 +19,4 @@ return <main className="fixture-main"><header><h1>AIMatterLab 受控故障组件
 {page==='workspace'&&<><fieldset><legend>受控 adapter（不是真实worker）</legend><label>下一读取<select aria-label="故障类型" onChange={e=>{requestMode=e.target.value as any;record('mode',requestMode);}} defaultValue="ready"><option value="ready">成功</option><option value="reject">请求失败</option><option value="timeout">600ms adapter超时拒绝</option><option value="hold">暂停响应</option></select></label><button onClick={()=>{setOwner(v=>v==='A'?'B':'A');record('owner-switch');}}>切换隔离owner A/B</button><button onClick={()=>{const pending=held;held=[];pending.forEach(f=>f());record('release-held',pending.length);}}>释放暂停响应</button></fieldset><p>当前owner {owner}</p><WorkspacePanel task={task(owner)} worker={true} busy={false} onRefresh={()=>{record('unexpected-refresh');}} onError={e=>{setErrors(v=>[...v,String(e)]);record('workspace-error',String(e));}}/></>}
 {page==='save'&&<><label><input type="checkbox" checked={saveFails} onChange={e=>setSaveFails(e.target.checked)}/>仅夹具保存失败（取消勾选后重试）</label>{saved?<p role="status">{saved}</p>:<ProjectAuthorizationForm defaults={project} environments={[{id:'fixture-env',name:'TEST ONLY environment'}] as any} onCancel={()=>{record('form-cancel');setPage('home');}} onSubmit={async value=>{record('form-submit',{name:value.name});await new Promise(r=>setTimeout(r,200));if(saveFails)throw Error('TEST ONLY: durable save unavailable');setSaved('夹具已接受本次草稿；无真实项目写入');record('form-saved',{name:value.name});}}/>}</>}
 {errors.length>0&&<details><summary>保留首错误记录（夹具）</summary><pre>{errors.join('\n')}</pre></details>}<details><summary>有限操作日志</summary><pre>{JSON.stringify(journal,null,2)}</pre></details></main>}
-createRoot(document.getElementById('root')!).render(<App/>);
+createRoot(document.getElementById('root')!).render(<ToastProvider><App/></ToastProvider>);

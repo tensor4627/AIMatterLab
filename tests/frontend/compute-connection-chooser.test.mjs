@@ -10,7 +10,7 @@ new Function("module","exports",compile("ssh-connection-types.ts"))(connectionTy
 const local={id:'fixture-wsl',version:2,kind:'wsl',name:'Fixture local',distribution:'Fixture Linux',root:'/fixture/service',port:9080,intent:'existing'};
 const ssh={id:'fixture-ssh',version:3,kind:'ssh',name:'Fixture SSH',host:'example.invalid',username:'fixture-user',port:22,ssh_client:'C:/Windows/System32/OpenSSH/ssh.exe',identity_file:'',proxy_jump:[],via:[],mode:'interactive'};
 function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
- profiles=structuredClone(profiles);const hooks=[],effects=[],calls=[],connected=[],errors=[];let index=0,dirty=false,disposed=false,tree,currentProps={...props};
+ profiles=structuredClone(profiles);const hooks=[],effects=[],calls=[],connected=[],errors=[],toasts=[];let index=0,dirty=false,disposed=false,tree,currentProps={...props};
  const state=v=>{const i=index++;hooks[i]??={value:typeof v==='function'?v():v};return [hooks[i].value,n=>{hooks[i].value=typeof n==='function'?n(hooks[i].value):n;dirty=true;}];};
  const ref=v=>{const i=index++;return hooks[i]??={current:v};};
  const effect=(fn,deps)=>{const i=index++,old=hooks[i];if(!old||deps.some((x,j)=>x!==old.deps[j])){const h={deps,cleanup:old?.cleanup};hooks[i]=h;effects.push(()=>{h.cleanup?.();h.cleanup=fn();});}};
@@ -21,7 +21,7 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
   {type:'button',props:{children:'取消',disabled:props.pending,onClick:props.onCancel}},
   {type:'button',props:{children:props.confirmLabel,disabled:props.pending||props.disabled,onClick:props.onConfirm,'data-testid':props.testId}},
  ]}}:type==='Notice'?{type,props:{...props,role:props.severity==='error'?'alert':'status'}}:{type,props};
- new Function('require','module','exports','window',compiled)(name=>name==='react'?{useState:state,useRef:ref,useEffect:effect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:v=>v}:name==="../../ui/ConfirmDialog"?{useConfirm:()=>confirm,ConfirmDialog:"ConfirmDialog"}:name==='../../ui/Notice'?{default:'Notice'}:name==='../../ui/Button'?{default:'button'}:name==="./ssh-connection-types"?connectionTypes.exports:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports,{});
+ new Function('require','module','exports','window',compiled)(name=>name==='react'?{useState:state,useRef:ref,useEffect:effect}:name==='react/jsx-runtime'?{jsx,jsxs:jsx}:name==="../../api/studio"?{invoke}:name==="../../ui/i18n"?{t:v=>v}:name==="../../ui/ConfirmDialog"?{useConfirm:()=>confirm,ConfirmDialog:"ConfirmDialog"}:name==='../../ui/Notice'?{default:'Notice'}:name==='../../ui/Button'?{default:'button'}:name==='../../ui/Toast'?{useToast:()=>({show:value=>toasts.push(value)})}:name==="./ssh-connection-types"?connectionTypes.exports:new Proxy({},{get:(_t,k)=>String(k)}),module,module.exports,{});
  function render(changes={}){currentProps={...currentProps,...changes};index=0;dirty=false;tree=module.exports.default({onLocal:p=>connected.push(['local',p]),onSsh:p=>connected.push(['ssh',p]),onClose:()=>connected.push(['close']),...currentProps});}
  const all=n=>Array.isArray(n)?n.flatMap(all):n&&typeof n==='object'?[n,...all(n.props?.children)]:[];
  const find=fn=>{const n=all(tree).find(fn);assert(n,'fixture node missing');return n;};
@@ -31,7 +31,7 @@ function harness({profiles=[local,ssh],override,props={},confirm=()=>true}={}){
  const input=(v,value)=>{id(v).props.onChange({target:{value}});render();};
  const submit=()=>{id('compute-profile-editor').props.onSubmit({preventDefault(){}});render();};
  const unmount=()=>{disposed=true;for(const h of hooks)h?.cleanup?.();};
- render();return {render,flush,find,id,input,submit,clickId,unmount,calls,connected,errors,all:(target=tree)=>all(target)};
+ render();return {render,flush,find,id,input,submit,clickId,unmount,calls,connected,errors,toasts,all:(target=tree)=>all(target)};
 }
 const row=(h,id)=>h.find(n=>n.props?.['data-profile-id']===id);
 
@@ -87,13 +87,13 @@ test('active SSH profile is marked current without treating an existing local wo
 });
 const children=n=>Array.isArray(n)?n.flatMap(children):n&&typeof n==='object'?[n,...children(n.props?.children)]:[];
 const edit=(h,id)=>children(row(h,id)).find(n=>n.props?.['aria-label']?.startsWith('编辑连接')).props.onClick();
-const connect=(h,id)=>children(row(h,id)).find(n=>n.type==='button'&&n.props.className==='button primary').props.onClick();
+const connect=(h,id)=>children(row(h,id)).find(n=>n.type==='button'&&n.props['data-guide-target']?.startsWith('saved-')).props.onClick();
 test('manager listing and unsaved edit/cancel never connect or persist',async()=>{
  const h=harness();await h.flush();assert.equal(h.all().filter(n=>n.props?.['data-testid']==='saved-compute-profile').length,2);assert.deepEqual(h.calls.map(c=>c.method),['compute.profiles.list']);
  h.clickId('compute-choice-ssh');h.input('compute-profile-name','Unsaved fixture');h.find(n=>n.type==='button'&&n.props.children==='取消').props.onClick();await h.flush();assert(!h.all().some(n=>n.props?.['data-testid']==='compute-profile-editor'));assert.deepEqual(h.connected,[]);assert(!h.calls.some(c=>c.method.endsWith('.save')||c.method.endsWith('.read')));h.unmount();
 });
 for(const kind of ['wsl','ssh'])test('new '+kind+' save uses expectedVersion zero and only stores a record',async()=>{
- const h=harness({profiles:[]});await h.flush();h.clickId(kind==='wsl'?'compute-choice-local':'compute-choice-ssh');await h.flush();h.input('compute-profile-name','New fixture');if(kind==='ssh'){h.input('compute-profile-host','example.invalid');h.input('compute-profile-username','fixture-user');}h.submit();await h.flush();const saved=h.calls.find(c=>c.method==='compute.profiles.save').data;assert.equal(saved.expectedVersion,0);assert.equal(saved.kind,kind);assert.equal(saved.id,undefined);assert.deepEqual(h.connected,[]);assert(h.all().some(n=>n.props?.role==='status'&&n.props.children==='连接已保存'));h.unmount();
+ const h=harness({profiles:[]});await h.flush();h.clickId(kind==='wsl'?'compute-choice-local':'compute-choice-ssh');await h.flush();h.input('compute-profile-name','New fixture');if(kind==='ssh'){h.input('compute-profile-host','example.invalid');h.input('compute-profile-username','fixture-user');}h.submit();await h.flush();const saved=h.calls.find(c=>c.method==='compute.profiles.save').data;assert.equal(saved.expectedVersion,0);assert.equal(saved.kind,kind);assert.equal(saved.id,undefined);assert.deepEqual(h.connected,[]);assert.deepEqual(h.toasts,[{message:'连接已保存'}]);h.unmount();
 });
 test('edit saves existing version; conflict preserves all user input',async()=>{
  const h=harness({override:(m,d,s)=>m==='compute.profiles.save'?Promise.reject(Error('profile_conflict')):s(m,d)});await h.flush();edit(h,'fixture-ssh');await h.flush();h.input('compute-profile-name','Edited fixture');h.input('compute-profile-host','changed.invalid');h.submit();await h.flush();const save=h.calls.find(c=>c.method==='compute.profiles.save').data;assert.equal(save.id,ssh.id);assert.equal(save.expectedVersion,3);assert.equal(h.id('compute-profile-name').props.value,'Edited fixture');assert.equal(h.id('compute-profile-host').props.value,'changed.invalid');assert(h.all().some(n=>n.props?.role==='alert'));assert.deepEqual(h.connected,[]);h.unmount();
@@ -110,7 +110,7 @@ test('read version conflict stays in manager without connecting or saving',async
 
 
 test('Agent becomes busy during authoritative profile read: late result does not connect and editing remains available',async()=>{
- const gate=deferred(),h=harness({override:(m,d,s)=>m==='compute.profiles.read'?gate.promise:s(m,d)});await h.flush();connect(h,ssh.id);h.render({connectionBusy:true});gate.resolve(ssh);await h.flush();assert.deepEqual(h.connected,[]);assert(h.all().some(n=>n.props?.role==='alert'&&n.props.children==='当前操作尚未完成，请稍后连接。'));assert(children(row(h,ssh.id)).find(n=>n.type==='button'&&n.props.className==='button primary').props.disabled);edit(h,ssh.id);await h.flush();assert.equal(h.id('compute-profile-host').props.value,ssh.host);assert.equal(h.id('compute-profile-host').props.disabled,false);h.unmount();
+ const gate=deferred(),h=harness({override:(m,d,s)=>m==='compute.profiles.read'?gate.promise:s(m,d)});await h.flush();connect(h,ssh.id);h.render({connectionBusy:true});gate.resolve(ssh);await h.flush();assert.deepEqual(h.connected,[]);assert(h.all().some(n=>n.props?.role==='alert'&&n.props.children==='当前操作尚未完成，请稍后连接。'));assert(children(row(h,ssh.id)).find(n=>n.type==='button'&&n.props['data-guide-target']==='saved-ssh').props.disabled);edit(h,ssh.id);await h.flush();assert.equal(h.id('compute-profile-host').props.value,ssh.host);assert.equal(h.id('compute-profile-host').props.disabled,false);h.unmount();
 });
 test('current connection badge requires observed active target and live gate, accepts only exact root or requested alias',async()=>{
  const alias={...local,id:'fixture-alias',root:'~/fixture'},wrong={...local,id:'fixture-default',root:'/settings-only'},wrongPort={...local,id:'fixture-port',port:9081};
@@ -130,7 +130,7 @@ test('deletion requires a named confirmation and cancelling never invokes remova
 test('confirmed deletion uses the displayed version, waits for acknowledgement and cannot double submit',async()=>{
  const gate=deferred(),h=harness({override:(m,d,s)=>m==='compute.profiles.remove'?gate.promise:s(m,d)});await h.flush();beginRemoval(h,ssh.id);const confirm=h.id('compute-profile-delete-confirm');confirm.props.onClick();confirm.props.onClick();await h.flush();
  assert.equal(removals(h).length,1);assert.deepEqual(removals(h)[0].data,{id:ssh.id,expectedVersion:ssh.version});assert.equal(h.id('compute-profile-delete-confirm').props.disabled,true);assert(row(h,ssh.id));assert.deepEqual(h.connected,[]);
- gate.resolve({removed:true,id:ssh.id,version:ssh.version});await h.flush();assert.equal(h.all().filter(n=>n.props?.['data-testid']==='saved-compute-profile').length,1);assert(row(h,local.id));assert(h.all().some(n=>n.props?.role==='status'&&n.props.children==='已删除保存的连接；现有作业、环境和凭据保留。'));assert.deepEqual(h.connected,[]);h.unmount();
+ gate.resolve({removed:true,id:ssh.id,version:ssh.version});await h.flush();assert.equal(h.all().filter(n=>n.props?.['data-testid']==='saved-compute-profile').length,1);assert(row(h,local.id));assert.deepEqual(h.toasts,[{message:'已删除保存的连接；现有作业、环境和凭据保留。'}]);assert.deepEqual(h.connected,[]);h.unmount();
 });
 
 for(const failure of ['compute_profile_changed','compute_profile_unavailable','compute_profile_in_use','unconfirmed transport'])test('failed removal '+failure+' retains the row and requires review instead of automatic retry',async()=>{
@@ -196,7 +196,7 @@ test('save and login explicitly persists the reviewed profile before opening its
 test('service settings for an older live connection load only its immutable historical profile',async()=>{const original={...ssh,version:2,host:'original.invalid',serviceEnvironment:{python:'/original/python',activation:''}},h=harness({props:{initialEdit:{profileId:ssh.id,profileVersion:2,nonce:'historical-service',section:'service'}},override:(method,data,standard)=>method==='compute.profiles.read'?structuredClone(original):standard(method,data)});try{await h.flush();const settings=h.all().find(n=>n.props?.profile?.id===ssh.id&&typeof n.props.onLogin==='function');assert.deepEqual(settings.props.profile,original);assert.deepEqual(h.calls.find(c=>c.method==='compute.profiles.read').data,{id:ssh.id,version:2});assert(!h.calls.some(c=>c.method==='compute.profiles.save'));assert.deepEqual(h.connected,[]);}finally{h.unmount();}});
 test('a mismatched historical profile cannot configure a different connection version',async()=>{const h=harness({props:{initialEdit:{profileId:ssh.id,profileVersion:2,nonce:'wrong-history',section:'service'}},override:(method,data,standard)=>method==='compute.profiles.read'?structuredClone(ssh):standard(method,data)});try{await h.flush();assert(!h.all().some(n=>n.props?.profile&&typeof n.props.onLogin==='function'));assert(h.all().some(n=>n.props?.role==='alert'));assert(!h.calls.some(c=>c.method==='compute.profiles.save'));}finally{h.unmount();}});
 
-test('the login card keeps one SSH login action and shares its service settings entry with the editor',async()=>{const h=harness();try{await h.flush();assert(h.id('compute-profile-service'));assert(!h.all().some(n=>n.props?.['data-testid']==='compute-profile-plain-ssh'));const saved=row(h,ssh.id);assert.equal(h.all(saved).filter(n=>n.type==='button'&&n.props.className==='button primary').length,1);edit(h,ssh.id);await h.flush();assert(h.id('compute-editor-service'));assert.deepEqual(h.connected,[]);}finally{h.unmount();}});
+test('the login card keeps one SSH login action and shares its service settings entry with the editor',async()=>{const h=harness();try{await h.flush();assert(h.id('compute-profile-service'));assert(!h.all().some(n=>n.props?.['data-testid']==='compute-profile-plain-ssh'));const saved=row(h,ssh.id);assert.equal(h.all(saved).filter(n=>n.type==='button'&&n.props['data-guide-target']==='saved-ssh').length,1);edit(h,ssh.id);await h.flush();assert(h.id('compute-editor-service'));assert.deepEqual(h.connected,[]);}finally{h.unmount();}});
 test('setup imports only the chosen SSH reference into an unsaved form',async()=>{
  const ref='fixture-ref',imported={name:'Example cluster',host:'example.invalid',username:'researcher',port:2222,ssh_client:'/usr/bin/ssh',identity_file:'~/.ssh/example',proxy_jump:['jump.example.invalid'],via:[]};
  const h=harness({profiles:[local,ssh],props:{preferredKind:'ssh'},override:(method,data,standard)=>{

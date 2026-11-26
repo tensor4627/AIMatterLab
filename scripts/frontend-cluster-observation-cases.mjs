@@ -95,6 +95,28 @@ export async function frontendClusterObservationCases({check,out}){
   assert.equal(await readCount(page,'/api/clusters'),1);
  });
 
+ await check('cluster-observation-monitor-first-read-failure-can-sync-to-empty',async page=>{
+  await configureFixture(page);
+  await page.evaluate(()=>{
+   const f=window.__test;
+   f.responses['/api/cluster-runs']=()=>f.finishFirstRead?[]:new Promise((_,reject)=>{f.finishFirstRead=()=>reject(Error('Synthetic first-read failure'));});
+   return window.renderTest('ClusterPage',{worker:true,sourceId:'fixture-source',settings:f.settings,
+    onError:error=>{throw error;},onRefresh(){},onAgent(){},onRun(){},onAuthenticate(){},onConnectCompute(){},onTerminal(){}});
+  });
+  await page.locator('.cluster-page .settings-advanced summary').press('Enter');
+  await page.getByRole('button',{name:'作业监视',exact:true}).press('Enter');
+  const monitor=page.getByTestId('cluster-monitor');
+  await monitor.locator('.aml-loading-state').getByRole('status').waitFor();
+  await page.evaluate(()=>window.__test.finishFirstRead());
+  const failure=monitor.locator('.aml-error-state');
+  await failure.getByRole('alert').getByText('读取作业记录失败。',{exact:true}).waitFor();
+  assert.equal(await monitor.locator('.aml-empty-state').count(),0);
+  await failure.getByRole('button',{name:'同步记录',exact:true}).press('Enter');
+  await monitor.locator('.aml-empty-state').getByRole('heading',{name:'尚无运行记录',exact:true}).waitFor();
+  assert.equal(await readCount(page,'/api/cluster-runs'),2);
+  assert.equal(await readCount(page,'/api/cluster/submit'),0);
+ });
+
  await check('cluster-observation-native-app-preserves-original-restore-after-disconnect',async page=>{
   await configureFixture(page);
   await page.evaluate(()=>{

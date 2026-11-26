@@ -91,8 +91,9 @@ export async function frontendNoticeSeverityCases({check,out}){
   await dialog.getByRole('button',{name:'DeepSeek API',exact:true}).click();
   const test=dialog.getByTestId('test-api-connection');
   await test.click();
-  const success=dialog.getByTestId('api-connection-feedback');
-  await assertNotice(success,'info','提示');
+  const success=page.getByTestId('api-connection-feedback');
+  await success.getByRole('status').waitFor();
+  assert.equal(await success.getAttribute('data-toast-severity'),'success');
   assert.match(await success.innerText(),/测试调用成功.*fixture-model/s);
   await page.screenshot({path:path.join(out,'account-test-info-'+theme+'.png')});
   await page.evaluate(()=>window.__test.failTest=true);

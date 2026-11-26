@@ -60,7 +60,7 @@ test('a confirmed interrupt keeps partial output and permits a new send before t
   await h.flush();
   assert.deepEqual(h.errors,[]);
   assert.equal(h.textarea().props.value,'Continue the same conversation.');
-  assert.equal(h.find(node=>node.props?.className==='agent-send-notice').props.children,'已停止当前回复。');
+  assert.equal(h.toasts.at(-1).message,'已停止当前回复。');
   assert(messages(h).some(message=>message.text==='Partial reply before stop.'));
   h.send();await h.flush();
   assert.deepEqual(rpcCalls(h,'turn/start').map(call=>call.data.params.threadId),['started-thread','started-thread']);
@@ -138,7 +138,7 @@ for(const [provider,valid]of [['qwen',false],['compatible',true]])test(provider+
   h.type('Continue the same conversation');assert.equal(sendButton(h).props.disabled,false);h.send();await h.flush();
   assert.deepEqual(h.calls.filter(call=>call.method==='agent.connect').map(call=>call.data),[{provider,repairTools:false,threadId:'historic'}]);
   if(valid){assert.deepEqual(starts(h).map(call=>[call.data.params.threadId,call.data.params.model]),[['historic',original]]);assert.equal(h.textarea().props.value,'');}
-  else{assert.equal(starts(h).length,0);assert.equal(h.textarea().props.value,'Continue the same conversation');assert.match(JSON.stringify(h.find(node=>node.props?.className==='agent-send-notice')),/配置不存在或已移除/);}
+  else{assert.equal(starts(h).length,0);assert.equal(h.textarea().props.value,'Continue the same conversation');assert.match(JSON.stringify(h.find(node=>node.props?.className?.split(' ').includes('agent-send-notice'))),/配置不存在或已移除/);}
   assert.equal(messages(h)[0].text,'Saved answer [redacted]');assert.deepEqual(h.errors,[]);
  }finally{h.unmount();}
 });

@@ -85,7 +85,7 @@ function nativeResourceHarness(config){
  async function click(selector){await evaluate(`(()=>{const value=document.querySelector(${JSON.stringify(selector)});if(!value||value.disabled||!value.getClientRects().length)throw Error('Unavailable native resource control');value.click();})()`);}
  const record=(name,details={})=>{receipt.checks.push({name,status:'passed',...details});save();};
  const resource=()=>invoke('compute.resource.status'),list=()=>invoke('sharedTerminal.list');
- async function chooser(){await click('[data-testid="unified-compute-entry"]');await until('actual chooser',()=>evaluate('!!document.querySelector(\'[data-testid="compute-resource-manager"]\')?.getClientRects().length'));await click('[data-profile-id="'+fixtureProfile.id+'"] button.primary');}
+ async function chooser(){await click('[data-testid="unified-compute-entry"]');await until('actual chooser',()=>evaluate('!!document.querySelector(\'[data-testid="compute-resource-manager"]\')?.getClientRects().length'));await click('[data-profile-id="'+fixtureProfile.id+'"] [data-guide-target="saved-ssh"]');}
  async function check(){
   const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');assert.equal(sha(new URL(config.mainUrl)),config.mainSha256);assert.equal(sha(config.client),config.clientSha256);
   receipt.renderer=nativeRendererEvidence({preferences:owner.webContents.getLastWebPreferences(),configuredPreload:config.preload,expectedHash:config.preloadSha256,actualHash:sha(config.preload),sessionPreloads:owner.webContents.session.getPreloadScripts()});

@@ -140,7 +140,7 @@ export async function frontendChatEvidenceCases({check,out}){
    const comment='Check the exact two selected lines';
    await source.getByLabel('批注（可选）',{exact:true}).fill(comment);
    await source.getByRole('button',{name:'把所选行加入草稿',exact:true}).click();
-   await source.getByRole('status').filter({hasText:'已添加到对话草稿'}).waitFor();
+   await page.getByTestId('toast-region').getByRole('status').filter({hasText:'已添加到对话草稿'}).last().waitFor();
    const compose=page.locator('.agent-panel textarea[data-guide-target="composer"]');
    await page.waitForFunction(comment=>document.querySelector('.agent-panel textarea[data-guide-target="composer"]')?.value===comment,comment);
    await page.locator('.conversation-item').filter({hasText:fixture.b.name}).click();
@@ -204,7 +204,7 @@ export async function frontendChatEvidenceCases({check,out}){
    assert.match(await diff.innerText(),/修改前 · r1 [^\n]+ · fs[\s\S]*修改后 · r2 [^\n]+ · fs[\s\S]*0\.5/);
    await parameter.getByLabel('批注（可选）',{exact:true}).fill('Review 0.5 fs before sending');
    await parameter.getByRole('button',{name:'把带批注的差异加入草稿',exact:true}).click();
-   await parameter.getByRole('status').filter({hasText:'已添加到对话草稿'}).waitFor();
+   await page.getByTestId('toast-region').getByRole('status').filter({hasText:'已添加到对话草稿'}).last().waitFor();
    await page.waitForFunction(()=>document.querySelector('.agent-panel textarea[data-guide-target="composer"]')?.value==='Review 0.5 fs before sending');
    assert.equal(fixture.received.length,0);
    await page.screenshot({path:path.join(out,'evidence-task-parameter-review.png')});
@@ -215,7 +215,7 @@ export async function frontendChatEvidenceCases({check,out}){
    await fileDiff.getByText('parameter 0.5',{exact:true}).waitFor();
    await currentFile.getByLabel('批注（可选）',{exact:true}).fill('Review the changed file line');
    await currentFile.getByRole('button',{name:'把带批注的差异加入草稿',exact:true}).click();
-   await currentFile.getByRole('status').filter({hasText:'已添加到对话草稿'}).waitFor();
+   await page.getByTestId('toast-region').getByRole('status').filter({hasText:'已添加到对话草稿'}).last().waitFor();
    await page.locator('.composer').getByTestId('chat-file-chip').filter({hasText:'run.in'}).waitFor();
    assert.match(await page.locator('.agent-panel textarea[data-guide-target="composer"]').inputValue(),/Review 0\.5 fs before sending\n\nReview the changed file line/);
    await page.screenshot({path:path.join(out,'evidence-task-file-review.png')});
@@ -233,7 +233,7 @@ export async function frontendChatEvidenceCases({check,out}){
     await source.getByLabel('结束行',{exact:true}).fill('2');
     await source.getByLabel('起始行',{exact:true}).fill('2');
     await source.getByRole('button',{name:'把所选行加入草稿',exact:true}).click();
-    await source.getByRole('status').filter({hasText:'已添加到对话草稿'}).waitFor();
+    await page.getByTestId('toast-region').getByRole('status').filter({hasText:'已添加到对话草稿'}).last().waitFor();
    };
    await page.evaluate(()=>window.__test.evidenceAsk('fixture.append-log',{}));
    await addLine(log);

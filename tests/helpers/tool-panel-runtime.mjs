@@ -8,16 +8,20 @@ const sources=new Map();
 function compiled(file){if(!sources.has(file))sources.set(file,ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText);return sources.get(file);}
 
 export function toolPanelRuntime({file,props,bridge,flushCycles,external}){
- const hooks=[],effects=[],timers=new Map(),modules=new Map();let cursor=0,dirty=false,tree,disposed=false,timerSequence=0;
+ const hooks=[],effects=[],toasts=[],timers=new Map(),modules=new Map();let cursor=0,dirty=false,tree,disposed=false,timerSequence=0;
  const useState=initial=>{const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{const value=typeof next==='function'?next(hooks[index].value):next;if(!Object.is(value,hooks[index].value)){hooks[index].value=value;dirty=true;}}];};
  const useRef=initial=>{const index=cursor++;return hooks[index]??(hooks[index]={current:initial});};
  const useEffect=(fn,deps)=>{const index=cursor++,old=hooks[index];if(!old||!deps||deps.some((value,i)=>!Object.is(value,old.deps?.[i]))){const record={deps,cleanup:old?.cleanup};hooks[index]=record;effects.push(()=>{record.cleanup?.();record.cleanup=fn();});}};
+ const toast={show:entry=>toasts.push(entry)};
+ const ErrorState=({title,retained,details,action,...props})=>({type:'div',props:{...props,children:[title,retained,details,action]}});
  function load(file){
   if(file.endsWith('.json'))return {default:JSON.parse(fs.readFileSync(file,'utf8'))};
   file=path.resolve(file);if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
-  const jsx=(type,props)=>type===fixtureDisclosure?type(props):({type,props});
+  const jsx=(type,props)=>type===fixtureDisclosure||type===ErrorState?type(props):({type,props});
   const require=name=>{
    if(name.endsWith('/Disclosure'))return {default:fixtureDisclosure};
+   if(name.endsWith('/Toast'))return {useToast:()=>toast};
+   if(name.endsWith('/States'))return {EmptyState:'div',LoadingState:'span',ErrorState};
    const control=fixtureControlModule(name);if(control)return control;
    if(name==='react')return {useState,useRef,useEffect};
    if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
@@ -40,5 +44,5 @@ export function toolPanelRuntime({file,props,bridge,flushCycles,external}){
  function update(values){Object.assign(props,values);render();}
  function tick(){const pending=[...timers.values()];timers.clear();for(const timer of pending)timer.fn();render();}
  function unmount(){disposed=true;hooks.forEach(hook=>hook?.cleanup?.());}
- render();return {timers,flush,render,click,change,update,tick,unmount,find,text,nodes,all:()=>nodes(tree),tree:()=>tree,load};
+ render();return {timers,toasts,flush,render,click,change,update,tick,unmount,find,text,nodes,all:()=>nodes(tree),tree:()=>tree,load};
 }

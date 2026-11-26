@@ -45,7 +45,7 @@ test('measured progress uses confirmed counters only and backend start time rema
 const collection={files:[{id:'a',name:'a.txt',size:3,sha256:'a'.repeat(64)},{id:'b',name:'b.txt',size:3,sha256:'b'.repeat(64)}],manifest:{transfer_status:'passed'}};
 test('result collection gives immediate feedback and blocks repeated clicks before rerender',async()=>{
  const gate=deferred(),h=mount('features/cluster/ClusterResults.tsx',{run:{id:'run-a',status:'succeeded'}},()=>gate.promise);
- try{await h.flush();const click=h.button('回收结果').props.onClick;click();click();await h.flush();assert.equal(h.calls.length,1);assert(h.button('回收中…').props.disabled);assert(h.find(node=>node.type==='LoadingFeedback'&&node.props.label==='正在回收并校验结果…').props.busy);
+ try{await h.flush();const click=h.button('回收结果').props.onClick;click();click();await h.flush();assert.equal(h.calls.length,1);assert(h.button('回收中…').props.disabled);assert(h.find(node=>node.props?.label==='正在回收并校验结果…').props.busy);
   gate.resolve(collection);await h.flush();assert.match(h.text(),/回收完成/);assert.equal(h.button('回收结果').props.disabled,false);
  }finally{h.unmount();}
 });
@@ -53,7 +53,7 @@ test('result collection gives immediate feedback and blocks repeated clicks befo
 for(const outcome of ['success','failure'])test('a superseded result preview '+outcome+' cannot replace the selected file or report an old error',async()=>{
  const a=deferred(),b=deferred(),h=mount('features/cluster/ClusterResults.tsx',{run:{id:'run-a',status:'succeeded'}},(target,data)=>target.endsWith('/collect')?Promise.resolve(collection):data.name==='a.txt'?a.promise:b.promise);
  try{await h.flush();h.button('回收结果').props.onClick();await h.flush();const inspectA=h.button(/^a\.txt/).props.onClick;inspectA();inspectA();await h.flush();assert.equal(h.calls.filter(call=>call.target.endsWith('/result')).length,1);
-  h.button(/^b\.txt/).props.onClick();await h.flush();assert(h.find(node=>node.type==='LoadingFeedback'&&node.props.label==='正在读取结果预览…').props.busy);
+  h.button(/^b\.txt/).props.onClick();await h.flush();assert(h.find(node=>node.props?.label==='正在读取结果预览…').props.busy);
   b.resolve({name:'b.txt',text:'CURRENT PREVIEW'});await h.flush();if(outcome==='success')a.resolve({name:'a.txt',text:'STALE PREVIEW'});else a.reject(Error('STALE ERROR'));await h.flush();assert.match(h.text(),/CURRENT PREVIEW/);assert.doesNotMatch(h.text(),/STALE/);assert.deepEqual(h.errors,[]);
  }finally{h.unmount();}
 });

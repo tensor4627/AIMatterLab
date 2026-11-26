@@ -22,6 +22,27 @@ test('first artifact tab reads once; tab switches preserve; manual refresh and r
 for(const transition of ['disconnect','identity','unmount','event'])test('late collect cannot publish after '+transition,async()=>{const gate=deferred(),h=harness({request:()=>gate.promise});await h.flush();h.click('结果');await h.flush();assert.equal(collect(h).length,1);if(transition==='disconnect')h.render({connected:false});if(transition==='identity')h.render({run:{...h.run(),directory:'/owned/other'}});if(transition==='unmount')h.unmount();if(transition==='event')h.emit();await h.flush();gate.resolve({run:'r',artifacts:[{name:'LATE_SECRET',size:1}]});await h.flush();assert(!h.text().includes('LATE_SECRET'));assert.equal(collect(h).length,1);if(transition==='unmount')assert.equal(h.lateWrites(),0);h.unmount();});
 test('failed observation can retry and real empty directory is distinguished',async()=>{let n=0;const h=harness({request:async()=>{if(!n++)throw Error('fixture unavailable');return{run:'r',artifacts:[]};}});await h.flush();h.click('结果');await h.flush();assert(h.text().includes('读取失败'));h.click('收集产物');await h.flush();assert(h.text().includes('当前结果目录为空'));assert.equal(collect(h).length,2);h.unmount();});
 test('disconnected tab and reconnection do not automatically hash files',async()=>{const h=harness({props:{connected:false}});await h.flush();h.click('结果');await h.flush();assert.equal(collect(h).length,0);h.render({connected:true});await h.flush();assert.equal(collect(h).length,0);h.click('结果');await h.flush();assert.equal(collect(h).length,1);h.unmount();});
+test('artifact file read failure retains the selection and retries the same file',async()=>{
+ let reads=0;
+ const h=harness({request:async target=>{
+  if(target==='/api/run/collect')return {run:'r',artifacts:[{name:'actual.xyz',size:12}]};
+  if(!reads++)throw Error('Synthetic file unavailable');
+  return {text:'recovered fixture'};
+ }});
+ try{
+  await h.flush();
+  h.click('结果');await h.flush();
+  h.nodes().find(node=>node.type==='button'&&h.text(node).startsWith('actual.xyz')).props.onClick();
+  await h.flush();
+  const failure=h.nodes().find(node=>node.props?.title==='无法读取产物文件');
+  assert.match(h.text(failure),/保留当前文件选择/);
+  assert.match(h.text(failure),/Synthetic file unavailable/);
+  assert.deepEqual(h.errors,[]);
+  h.click('重新读取文件');await h.flush();
+  assert(h.nodes().some(node=>node.props?.value==='recovered fixture'));
+  assert.deepEqual(h.calls.filter(call=>call.target==='/api/run/file').map(call=>call.data.name),['actual.xyz','actual.xyz']);
+ }finally{h.unmount();}
+});
 const engineMap=JSON.parse(fs.readFileSync(new URL("../../backend/worker/studio_worker/engine_contracts.json",import.meta.url))).engines;
 test('all current routes plus unknown use conservative actual continuation entry support',async()=>{const expected=new Set(['gpumd.md','hotpp.train','pydyn.md','pydyn.sampling']);assert.deepEqual(Object.keys(engineMap).sort(),Object.keys(contracts.engines).sort());for(const engine of [...Object.keys(engineMap),'unknown']){const h=harness({props:{run:{id:'r',project_id:'p',environment_id:'e',directory:'/r',engine,status:'succeeded',parameters:{mode:'opes'},validation:{},command:[],inputs:{},created_at:1}}});await h.flush();assert.equal(!h.button('续算').props.disabled,expected.has(engine),engine);h.click('续算');await h.flush();if(!expected.has(engine))assert(!h.text().includes('从实际 checkpoint'));assert(!h.calls.some(c=>c.target==='/api/run/resume'));h.unmount();}assert(runContinuation('gpumd.sampling','static').allowed);for(const mode of ['opes','metad',undefined,'unknown'])assert(!runContinuation('gpumd.sampling',mode).allowed);assert(runContinuation('pydyn.sampling','opes').allowed);});
 test('unsupported changed route cannot dispatch cached unconfirmed continuation; cache retained',async()=>{const storage=memoryStorage(),cached=JSON.stringify({key:'unknown-request',parameters:{checkpoint_files:['actual.ckpt']}});storage.setItem('studio.resume.r',cached);const h=harness({storage});await h.flush();h.click('续算');await h.flush();const create=h.button('重试同一续算请求');h.render({run:{...h.run(),engine:'bias.validate'}});await h.flush();assert(h.button('重试同一续算请求').props.disabled);create.props.onClick();await h.flush();assert(!h.calls.some(c=>c.target==='/api/run/resume'));assert.equal(storage.getItem('studio.resume.r'),cached);h.unmount();});

@@ -25,8 +25,8 @@ for(const changed of ['path','environment','kind','project','worker-scope','conn
 
 for(const outcome of ['success','failure'])test('registration double click dispatches once and a stale '+outcome+' settles without presenting a result',async()=>{
  const {h,pending}=setup();try{await h.flush();const click=h.byId('asset-register').props.onClick;click();click();assert.equal(pending.length,1);h.render();h.change('asset-path','/inputs/b.xyz');assert.match(h.text(h.byId('asset-stale-status')),/仍可能完成/);
-  if(outcome==='success')pending[0].resolve({id:'asset-a'});else pending[0].reject(Error('Old registration failed'));await h.flush();assert(!h.all().some(node=>node.props?.['data-testid']==='asset-register-result'));assert.deepEqual(h.saved,[]);assert.deepEqual(h.errors,[]);assert.match(h.text(h.byId('asset-stale-status')),/旧登记请求已结束/);assert.doesNotMatch(h.text(h.byId('asset-stale-status')),/仍可能完成/);
-  h.byId('asset-register').props.onClick();pending[1].resolve({id:'asset-b'});await h.flush();assert.match(h.text(h.byId('asset-register-result')),/asset-b/);assert.equal(h.saved.length,1);
+  if(outcome==='success')pending[0].resolve({id:'asset-a'});else pending[0].reject(Error('Old registration failed'));await h.flush();assert(!h.all().some(node=>node.props?.['data-testid']==='asset-register-result'));assert.deepEqual(h.saved,[]);assert.deepEqual(h.errors,[]);assert.deepEqual(h.toasts,[]);assert.match(h.text(h.byId('asset-stale-status')),/旧登记请求已结束/);assert.doesNotMatch(h.text(h.byId('asset-stale-status')),/仍可能完成/);
+  h.byId('asset-register').props.onClick();pending[1].resolve({id:'asset-b'});await h.flush();assert.match(h.text(h.byId('asset-register-result')),/asset-b/);assert.equal(h.saved.length,1);assert.deepEqual(h.toasts,[{severity:'success',message:'资产已登记。'}]);
  }finally{h.unmount();}
 });
 
@@ -49,9 +49,29 @@ test('returning to the original input identity does not revive its abandoned pre
 });
 
 test('current inspection errors are visible and a manual retry can succeed',async()=>{
- const {h,pending}=setup();try{await h.flush();h.byId('asset-preview').props.onClick();pending[0].reject(Error('Fixture inspection rejected'));await h.flush();assert.match(h.text(h.find(node=>node.props?.severity==='error')),/Fixture inspection rejected/);assert.equal(h.errors.length,1);assert(!h.byId('asset-preview').props.disabled);h.byId('asset-preview').props.onClick();pending[1].resolve(result(2));await h.flush();assert.equal(h.find(node=>node.type==='Structure').props.data.n_atoms,2);assert(!h.all().some(node=>node.props?.role==='alert'));}finally{h.unmount();}
+ const {h,pending}=setup();try{await h.flush();h.byId('asset-preview').props.onClick();pending[0].reject(Error('Fixture inspection rejected'));await h.flush();assert.match(h.text(h.find(node=>node.props?.title==='无法读取结构预览')),/Fixture inspection rejected/);assert.equal(h.errors.length,0);assert(!h.byId('asset-preview').props.disabled);h.find(node=>node.type==='button'&&h.text(node)==='重试预览').props.onClick();pending[1].resolve(result(2));await h.flush();assert.equal(h.find(node=>node.type==='Structure').props.data.n_atoms,2);assert(!h.all().some(node=>node.props?.title==='无法读取结构预览'));}finally{h.unmount();}
 });
 
 test('preview requires a current project, path, registered environment and integer frame',async()=>{
  const {h}=setup();try{await h.flush();for(const frame of ['-1','1.5']){h.change('asset-frame',frame);assert(h.byId('asset-preview').props.disabled);h.byId('asset-preview').props.onClick();}h.change('asset-frame','0');h.render({projectId:''});h.byId('asset-preview').props.onClick();h.render({projectId:'project-a',environments:[]});h.byId('asset-preview').props.onClick();assert.deepEqual(h.calls,[]);}finally{h.unmount();}
+});
+
+test('Materials Project key save is serialized and a late initial status cannot overwrite the receipt',async()=>{
+ const initial=deferred(),write=deferred();
+ const h=assetHarness({component:'MaterialsProjectSettings',override:call=>call.method==='materials.status'?initial.promise:write.promise});
+ const status=()=>h.text(h.find(node=>node.type==='div'&&node.props?.compact));
+ try{
+  await h.flush();
+  assert.match(status(),/密钥配置状态待核对/);
+  h.find(node=>node.type==='input').props.onChange({target:{value:'fixture-key'}});
+  h.render();
+  const save=h.find(node=>node.type==='button'&&h.text(node)==='保存密钥').props.onClick;
+  save();save();
+  assert.equal(h.calls.filter(call=>call.method==='materials.key').length,1);
+  assert.deepEqual(h.toasts,[]);
+  write.resolve({configured:true});await h.flush();
+  initial.resolve({configured:false});await h.flush();
+  assert.match(status(),/密钥已配置/);
+  assert.deepEqual(h.toasts,[{severity:'success',message:'设置已保存'}]);
+ }finally{h.unmount();}
 });

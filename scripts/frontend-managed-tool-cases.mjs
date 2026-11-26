@@ -78,6 +78,9 @@ export async function frontendManagedToolCases({check,out}){
 
   await check('experience-resource-tool-structured-manifest-without-json',async page=>{
    const panel=await openResourceToolForm(page);
+   const primary=panel.locator('button[data-variant="primary"]:visible');
+   assert.equal(await primary.count(),1);
+   assert.equal(await primary.getAttribute('data-testid'),'resource-tool-plan');
    assert.equal(await panel.getByTestId('resource-tool-io').isVisible(),false);
    const argv=['--label=seed A','{input:settings}','{input:seed}','{output:summary}'];
    for(const [index,argument] of [...argv,'unused'].entries()){
@@ -115,6 +118,8 @@ export async function frontendManagedToolCases({check,out}){
    await page.screenshot({path:path.join(out,'resource-tool-structured-manifest.png')});
    await submit.click();
    await panel.getByTestId('resource-tool-receipt').waitFor();
+   assert.equal(await primary.count(),1);
+   assert.equal(await primary.getAttribute('data-testid'),'resource-tool-start');
    const [call,...extra]=await planCalls(page);
    assert.deepEqual(extra,[]);assert.equal(call.method,'tools.resource.plan');
    const {project_id,cluster_id,environment_id,queue_target_id}=resourceTestTarget;
@@ -140,13 +145,19 @@ export async function frontendManagedToolCases({check,out}){
    assert.equal(await test.inputValue(),testSource.replace('120','33'));
    const submit=panel.getByTestId('resource-tool-plan');
    await submit.click();
-   await panel.getByRole('alert').filter({hasText:'A JSON number would lose precision when saved.'}).waitFor();
+   await panel.getByText('A JSON number would lose precision when saved.',{exact:true}).waitFor();
+   assert.equal(await io.getAttribute('aria-invalid'),'true');
+   const describedBy=await io.getAttribute('aria-describedby');
+   assert.equal(await page.evaluate(id=>document.getElementById(id)?.textContent,describedBy),'A JSON number would lose precision when saved.');
    assert.deepEqual(await planCalls(page),[]);
    assert.equal(await io.inputValue(),edited);
    const unsupported=edited.replace('9007199254740993','41');
    await io.fill(unsupported);
    await submit.click();
-   await panel.getByRole('alert').filter({hasText:'Invalid resource tool request fields'}).waitFor();
+   const fault=panel.locator('.aml-error-state').filter({hasText:'Cannot check resource tools right now'});
+   await fault.getByRole('alert').waitFor();
+   await fault.locator('summary').click();
+   await fault.getByText(/Invalid resource tool request fields/).waitFor();
    assert.deepEqual((await planCalls(page)).map(call=>call.data.manifest.future),[{extra:41}]);
    assert.equal(await io.inputValue(),unsupported);
    const name=panel.getByTestId('resource-tool-input-name');

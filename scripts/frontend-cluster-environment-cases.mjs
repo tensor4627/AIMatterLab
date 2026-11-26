@@ -26,7 +26,7 @@ async function openClusterEnvironment(page,{deferProfileList=false}={}){
   }
   const {default:ClusterPage}=await import('/frontend/features/cluster/ClusterPage.tsx');
   const props={worker:true,sourceId:'fixture-environment-worker',serviceVersion:'current',settings:f.settings,project:f.project,onError:error=>{throw error;},onRefresh:()=>{},onAgent:prompt=>f.environmentPrompts.push(prompt),onRun:()=>{},onAuthenticate:()=>{},onConnectCompute:()=>{},onTerminal:()=>{}};
-  window.testRoot.render(window.React.createElement('div',{style:{height:'100%',overflow:'auto'}},window.React.createElement(ClusterPage,props)));
+  window.renderWithProviders(window.React.createElement('div',{style:{height:'100%',overflow:'auto'}},window.React.createElement(ClusterPage,props)));
  },deferProfileList);
  const cluster=page.getByTestId('cluster-settings');
  await cluster.getByRole('button',{name:'环境探测',exact:true}).click();
@@ -186,13 +186,19 @@ export async function frontendClusterEnvironmentCases({check,out}){
   await indicator('queues').click();
   await cluster.getByTestId('cluster-queue-settings').waitFor();
   await indicator('scheduler').click();
-  assert.equal(await cluster.getByRole('button',{name:'只读探测',exact:true}).isVisible(),true);
+  const save=cluster.getByRole('button',{name:'保存连接',exact:true});
+  const probe=cluster.getByRole('button',{name:'只读探测',exact:true});
+  assert.equal(await probe.getAttribute('data-variant'),'primary');
+  assert.equal(await save.getAttribute('data-variant'),'secondary');
   await indicator('science').press('Enter');
   const editor=cluster.getByRole('region',{name:'科学环境',exact:true});
   await page.waitForFunction(()=>document.activeElement?.classList.contains('cluster-science-environment'));
   assert.equal(await editor.evaluate(node=>document.activeElement===node),true);
   await indicator('ssh').click();
-  assert.equal(await cluster.getByTestId('ssh-test').isEnabled(),true);
+  const sshTest=cluster.getByTestId('ssh-test');
+  assert.equal(await sshTest.isEnabled(),true);
+  assert.equal(await sshTest.getAttribute('data-variant'),'primary');
+  assert.equal(await save.getAttribute('data-variant'),'secondary');
   await page.clock.fastForward(901000);
   await cluster.locator('[data-testid="cluster-ready-ssh"][data-state="expired"]').waitFor();
   assert.equal(await indicator('scheduler').getAttribute('data-state'),'expired');
@@ -247,7 +253,11 @@ export async function frontendClusterEnvironmentCases({check,out}){
   await cluster.getByTestId('ssh-port').fill('54372');
   await hide.press('Enter');
   await snapshotMasked([...values,'54372']);
-  await cluster.getByTestId('ssh-test').click();
+  const test=cluster.getByTestId('ssh-test');
+  assert.equal(await test.getAttribute('data-variant'),'secondary');
+  assert.equal(await cluster.getByRole('button',{name:'保存连接',exact:true}).getAttribute('data-variant'),'primary');
+  await test.click();
+  await page.getByTestId('toast-region').getByText('SSH 连接验证通过，远程用户匹配',{exact:true}).waitFor();
   await cluster.locator('[data-testid="cluster-ready-ssh"][data-state="verified"]').waitFor();
   assert.equal(await page.evaluate(()=>window.__test.calls.find(call=>call.method==='worker.request'&&call.data.target==='/api/cluster/test').data.data.connection.port),54372);
   await reveal.click();
@@ -307,13 +317,24 @@ export async function frontendClusterEnvironmentCases({check,out}){
   const details=editor.getByTestId('cluster-environment-json');
   assert.equal(await details.evaluate(node=>node.open),false);
   await editor.getByRole('textbox',{name:'可执行文件绝对路径',exact:true}).first().fill('/fixture/selected-python');
+  assert.equal(await cluster.getByRole('button',{name:'只读探测',exact:true}).getAttribute('data-variant'),'secondary');
+  assert.equal(await cluster.getByRole('button',{name:'保存连接',exact:true}).getAttribute('data-variant'),'primary');
   await editor.getByRole('textbox',{name:'变量值',exact:true}).first().fill('8');
   const repositories=editor.getByTestId('cluster-environment-repositories');
   await repositories.getByRole('button',{name:'添加仓库路径',exact:true}).click();
   await repositories.getByRole('textbox',{name:'仓库标识',exact:true}).last().fill('gpumd');
   await repositories.getByRole('textbox',{name:'仓库绝对路径',exact:true}).last().fill('/fixture/registered/gpumd');
+  const surfaces=await cluster.getByRole('button',{name:/^(只读探测|保存连接)$/}).evaluateAll(async buttons=>{
+   await Promise.allSettled(buttons.flatMap(button=>button.getAnimations().map(animation=>animation.finished)));
+   return buttons.map(button=>getComputedStyle(button).backgroundColor);
+  });
+  assert.equal(surfaces.length,2);
+  assert.notEqual(surfaces[0],surfaces[1]);
   await page.screenshot({path:path.join(out,'cluster-environment-structured-1024.png')});
-  await details.locator('summary').click();
+  const summary=details.locator('summary');
+  await summary.locator('svg.aml-disclosure-arrow').waitFor();
+  await summary.press('Enter');
+  assert.equal(await details.evaluate(node=>node.open),true);
   const text=details.getByRole('textbox',{name:'显式科学环境 · JSON',exact:true});
   const expected={...await page.evaluate(()=>window.__test.originalEnvironment),executables:{python:'/fixture/selected-python',gpumd:'/fixture/gpumd'},repositories:{pydyn:'/fixture/pydyn',gpumd:'/fixture/registered/gpumd'},variables:{OMP_NUM_THREADS:8,LIBRARY_PATH:''}};
   assert.deepEqual(JSON.parse(await text.inputValue()),expected);
@@ -324,7 +345,7 @@ export async function frontendClusterEnvironmentCases({check,out}){
   assert.equal(await page.evaluate(()=>window.__test.environmentSaves.length),0);
   await gpu.fill('0');
   await cluster.getByRole('button',{name:'保存连接',exact:true}).click();
-  await cluster.getByText('连接已保存；项目授权未改变。',{exact:true}).waitFor();
+  await page.getByTestId('toast-region').getByText('连接已保存；项目授权未改变。',{exact:true}).waitFor();
   const saved=await page.evaluate(()=>window.__test.environmentSaves);
   assert.equal(saved.length,1);
   assert.equal(saved[0].id,'environment-cluster');assert.equal(saved[0].version,4);assert.equal(saved[0].limits.gpus,0);
