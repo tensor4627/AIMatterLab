@@ -102,21 +102,7 @@
     font-size: var(--font-caption);
   }
 
-  .structure-wrap {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 320px;
-  }
-
-  .structure {
-    flex: 1;
-    min-height: 290px;
-    background: radial-gradient(circle,var(--fill-subtle),transparent);
-  }
-
   .structure-card {
-    height: 420px;
     border: 1px solid var(--line);
     border-radius: var(--radius-xs);
     margin-top: var(--space-6);

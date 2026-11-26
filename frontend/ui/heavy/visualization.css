@@ -1,4 +1,17 @@
 @layer components {
+  .structure-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 320px;
+  }
+
+  .structure {
+    flex: 1;
+    min-height: 290px;
+    background: radial-gradient(circle,var(--fill-subtle),transparent);
+  }
+
   .structure-toolbar {
     display: flex;
     align-items: center;
