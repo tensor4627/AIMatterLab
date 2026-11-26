@@ -33,6 +33,7 @@ function fixture(t,layout){
   const target=path.join(root,'scripts',name);fs.mkdirSync(path.dirname(target),{recursive:true});
   fs.copyFileSync(new URL('../../scripts/'+name,import.meta.url),target);
  }
+ write('contracts/agent/dsh-runtime-layout.mjs',fs.readFileSync(new URL('../../contracts/agent/dsh-runtime-layout.mjs',import.meta.url),'utf8'));
  // This test covers build-tool loading only; runtime auditing has its own suite.
  write('backend/main/compute/cli-runtime.mjs','export const validateCliRuntimeLock=value=>value;');
  const modules=path.join(root,'node_modules');fs.mkdirSync(modules,{recursive:true});

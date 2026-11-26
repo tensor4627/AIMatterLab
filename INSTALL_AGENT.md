@@ -1,23 +1,23 @@
-# AIMatterLab 0.2.9 · 交给本机 Agent 的安装提示
+# AIMatterLab 0.2.10 · 交给本机 Agent 的安装提示
 
 你是用户本机的安装协作者。请实际执行本文流程，安装 AIMatterLab、配置用户选定的计算环境，并运行版本化短例。适用于 Codex、Claude Code 等具备文件、终端和 Git 能力的通用 Agent。目标集群无需安装这些 Agent CLI。
 
 ## 获取可信源码
 
-在准备存放源码的父目录运行以下命令。正式版发布后，从 GitHub 主仓库 `https://github.com/tensor4627/AIMatterLab.git` 按 `refs/tags/v0.2.9` 固定版本。验证本地候选版时，请将 `$releaseSource` 指向持有候选源码的仓库，并在 `$approvedSourceCommit` 填写经核对的完整提交 ID。
+在准备存放源码的父目录运行以下命令。正式版发布后，从 GitHub 主仓库 `https://github.com/tensor4627/AIMatterLab.git` 按 `refs/tags/v0.2.10` 固定版本。验证本地候选版时，请将 `$releaseSource` 指向持有候选源码的仓库，并在 `$approvedSourceCommit` 填写经核对的完整提交 ID。
 
 ```powershell
 $releaseSource = 'https://github.com/tensor4627/AIMatterLab.git'
 $approvedSourceCommit = ''
-git clone --no-checkout -- "$releaseSource" AIMatterLab-0.2.9
+git clone --no-checkout -- "$releaseSource" AIMatterLab-0.2.10
 if ($LASTEXITCODE -ne 0) { throw '请核对仓库读取权限和新目录位置' }
-Set-Location -LiteralPath AIMatterLab-0.2.9
+Set-Location -LiteralPath AIMatterLab-0.2.10
 if ($approvedSourceCommit -match '^[0-9a-f]{40}$') {
   $sourceCommit = git rev-parse --verify "$approvedSourceCommit^{commit}"
 } else {
-  $sourceCommit = git rev-parse --verify 'refs/tags/v0.2.9^{commit}'
+  $sourceCommit = git rev-parse --verify 'refs/tags/v0.2.10^{commit}'
 }
-if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw '请提供已核对的 0.2.9 发布标签或完整提交 ID' }
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw '请提供已核对的 0.2.10 发布标签或完整提交 ID' }
 git merge-base --is-ancestor $sourceCommit refs/remotes/origin/main
 if ($LASTEXITCODE -ne 0) { throw '发布提交不在所选源码仓库的 main 历史中' }
 git switch --create aimatterlab-source $sourceCommit
@@ -25,13 +25,13 @@ if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD) -ne $sourceCommit) { throw '源
 git branch --set-upstream-to=origin/main
 if ($LASTEXITCODE -ne 0) { throw '源码更新分支配置失败' }
 $release = Get-Content -Raw -LiteralPath installation/manifest.json | ConvertFrom-Json
-if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.2.9' -or $release.source_ref -ne 'refs/tags/v0.2.9') { throw '安装清单与所选版本不符' }
+if ($release.product -ne 'AIMatterLab' -or $release.version -ne '0.2.10' -or $release.source_ref -ne 'refs/tags/v0.2.10') { throw '安装清单与所选版本不符' }
 ```
 
 记录 `$sourceCommit` 作为此次安装的版本。用户以后选择更新时，在同一目录运行 `git pull --ff-only`，再双击仓库根目录的 `Launch-AIMatterLab.cmd`。
 
 - 源码就位后，从该提交读取 `AGENTS.md`、`installation/config.example.json`、`scripts/one_prompt.py` 和 `agent/builtin-skills/studio-compute-workflow/SKILL.md`。按本次取得的安装提示继续配置。仓库和资源获取使用已核对的实际地址，版本化安装使用固定源码及其依赖锁。
-- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.2.9 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
+- 已有完整工作区且用户要求沿用当前检出时，记录其实际提交和本地改动，使用其中的配置与安装器。需要精确复现 0.2.10 时使用独立、干净的目录。保留原安装、用户文件及科学引擎所在分支。
 - 桌面平台为 Windows。用 Windows OpenSSH 连接远端集群时，本机需要可用的 `ssh.exe`。选择本地 Linux 执行或 WSL SSH 时才需要已安装的 WSL。根据选中的路线检查依赖，缺少必要条件时记录 blocked 和具体原因。
 
 需要科学工具时，先读随 AIMatterLab 提供的[工具仓库清单](installation/tool-sources.json)。按用户选择从 `url` 克隆 `branch` 到新目录，再阅读其中的 `guide` 完成安装。`validated_commit` 记录历史接入验收版本，登记环境时使用实际检出的提交。

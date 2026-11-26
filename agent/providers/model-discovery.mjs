@@ -6,7 +6,7 @@ const MAX_BYTES=4*1024*1024;
 export function installedModelCatalog(catalogProvider,{runtime=resolveDshRuntime()}={}){
  if(!/^[a-z][a-z0-9-]*$/.test(catalogProvider))return [];
  // Resolve the catalog through the adapter's own declared dependency.
- const modules=path.resolve(path.dirname(runtime.args[1]),'../../..'),adapter=path.join(modules,'@deepseek-ai/dsh-llm-pi-ai/package.json');
+ const adapter=path.join(runtime.modules,'@deepseek-ai/dsh-llm-pi-ai/package.json');
  let directory=path.dirname(adapter),packageRoot;
  for(;;){const candidate=path.join(directory,'node_modules/@earendil-works/pi-ai');if(fs.existsSync(path.join(candidate,'package.json'))){packageRoot=candidate;break;}const parent=path.dirname(directory);if(parent===directory)break;directory=parent;}
  if(!packageRoot)throw Error('DSH 模型目录组件缺失');

@@ -32,6 +32,13 @@ const labels:Record<UpdateState['phase'],string> = {
   downloading:'正在下载更新…',verifying:'正在校验安装包…',ready:'更新已就绪，可在方便时重启。',
   preparing:'正在准备重启…',installing:'正在退出并安装更新…',error:'检查或安装更新失败。'
 };
+const packageLabels:Record<NonNullable<UpdateState['mode']>,string> = {
+  app:'应用更新包',delta:'增量下载',full:'完整安装包'
+};
+const fallbackHints:Record<NonNullable<UpdateState['reason']>,string> = {
+  app:'将使用安装包继续更新。',base:'本机没有差分基准，可下载完整安装包。',map:'差分数据不可用，可下载完整安装包。',
+  delta:'差分数据不可用，可下载完整安装包。',retry:'可重新下载完整安装包。'
+};
 const issueHints:Partial<Record<number,string>> = {
   401:'认证失败，请核对令牌是否有效。',
   403:'访问被拒绝，请核对项目角色和令牌权限。',
@@ -98,8 +105,9 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
   const {phase,mode,bytes,received=0,detail} = state;
   const check = canCheck(phase), available=canUpdate(state);
   const ahead=phase==='current' && state.version && state.version!==state.currentVersion;
+  const phaseLabel=mode==='app'&&phase==='verifying'?'正在校验应用更新包…':labels[phase];
   const status=phase==='checking' ? (state.step==='cache'?'正在检查本地更新缓存…':state.step==='blocks'?'正在比对新旧版本的数据块…':'正在读取发布清单…') :
-    phase==='ready'&&state.automatic?'安装包已校验。':ahead?'本机版本高于发布源的最新版本。':labels[phase];
+    phase==='ready'&&state.automatic?(mode==='app'?'应用更新包已校验。':'安装包已校验。'):ahead?'本机版本高于发布源的最新版本。':phaseLabel;
   const percent=state.fullBytes ? Math.min(100,Math.floor((state.assembled??0)*100/state.fullBytes)) : 0;
   return <section className="software-update" aria-label={t('软件更新')}>
     <dl className="update-versions">
@@ -107,12 +115,12 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
       {state.version&&(phase!=='current'||ahead)&&<div><dt>{t('发布源最新版本')}</dt><dd>{state.version}</dd></div>}
     </dl>
     <p className="update-state" role="status"><strong>{t(status)}</strong>{state.source&&<small>{sourceLabel(state.source)}</small>}</p>
-    {phase==='available' && state.reason && <p>{t(state.reason==='base'?'本机没有差分基准，可下载完整安装包。':state.reason==='retry'?'可重新下载完整安装包。':'差分数据不可用，可下载完整安装包。')}</p>}
-    {bytes!==undefined && (phase==='available'||phase==='downloading') && <p>{t(mode==='delta'?'增量下载':'完整安装包')} · {phase==='downloading'?mib(received)+' / ':''}{mib(bytes)}</p>}
-    {phase==='downloading' && <div className="update-progress"><progress aria-label={t('安装包准备进度')} value={state.assembled??0} max={state.fullBytes||1}/><span>{percent}%</span>
+    {phase==='available' && state.reason && <p>{t(fallbackHints[state.reason])}</p>}
+    {bytes!==undefined && (phase==='available'||phase==='downloading') && <p>{t(packageLabels[mode??'full'])} · {phase==='downloading'?mib(received)+' / ':''}{mib(bytes)}</p>}
+    {phase==='downloading' && <div className="update-progress"><progress aria-label={t(mode==='app'?'下载进度':'安装包准备进度')} value={state.assembled??0} max={state.fullBytes||1}/><span>{percent}%</span>
       {mode==='delta'&&<small>{t('已复用本地数据')} {mib(Math.max(0,(state.assembled??0)-received))}</small>}
       {state.reason==='delta'&&<small>{t('差分下载未完成，正在获取完整包。')}</small>}</div>}
-    {(phase==='checking'||phase==='verifying'||phase==='preparing'||phase==='installing') && <progress aria-label={t(labels[phase])}/>}
+    {(phase==='checking'||phase==='verifying'||phase==='preparing'||phase==='installing') && <progress aria-label={t(phaseLabel)}/>}
     {detail && <small role="alert">{detail}</small>}
     {state.issues&&<ul>{state.issues.map(issue=><li key={issue.source}>{sourceLabel(issue.source)} · {issueLabel(issue)}</li>)}</ul>}
     {check && <button className="button" onClick={()=>void act('updates.check')}><RefreshCw size={15}/>{t('检查更新')}</button>}

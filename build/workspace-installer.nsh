@@ -174,33 +174,74 @@ LangString WorkspaceReopen 1033 "Reopening AIMatterLab…"
   DetailPrint "$(WorkspaceRegister)"
 !macroend
 
+!macro workspaceInstallerSize FILE OUT
+  StrCpy ${OUT} ""
+  ClearErrors
+  FileOpen $R5 "${FILE}" r
+  ${IfNot} ${Errors}
+    ClearErrors
+    FileSeek $R5 0 END ${OUT}
+    ${If} ${Errors}
+      StrCpy ${OUT} ""
+    ${EndIf}
+    FileClose $R5
+  ${EndIf}
+!macroend
+
 !macro customInstall
   DetailPrint "$(WorkspaceGuide)"
   File /oname=$PLUGINSDIR\workspace-guide.md "${PROJECT_DIR}\installation\workspace-guide.md"
   ; Seed a local directory guide on fresh install. Runtime instructions come from app.asar.
   System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\workspace-guide.md", w "$INSTDIR\AGENTS.md", i 1)i.r0'
-  ; Seed a fresh base even for an offline/manual installation. Replace atomically.
+  ; Promote the verified desktop download in place. Manual setups still seed a base.
   DetailPrint "$(WorkspaceCache)"
-  GetTempFileName $R3 "$INSTDIR\user-cache\updates"
-  StrCpy $2 $R3
-  System::Call 'kernel32::CopyFileW(w "$EXEPATH", w r2, i 0)i.r0'
-  ${If} $0 != 0
-    System::Call 'kernel32::MoveFileExW(w r2, w "$INSTDIR\user-cache\updates\installer.exe", i 9)i.r0'
+  StrCpy $R8 "$INSTDIR\user-cache\updates\installer.exe"
+  StrCpy $R9 "$EXEPATH"
+  StrCpy $R7 "0"
+  ${If} $workspaceRestartDir != ""
+  ${AndIf} "$EXEPATH" == "$INSTDIR\user-cache\updates\pending.exe"
+    System::Call 'kernel32::MoveFileExW(w "$EXEPATH", w "$R8", i 1)i.r0?e'
+    Pop $1
+    ${If} $0 != 0
+      StrCpy $R9 $R8
+    ${ElseIf} $1 == 32
+      ; NSIS can hold the running setup open. The reopened app promotes it after exit.
+      System::Call 'kernel32::CreateFileW(w "$INSTDIR\user-cache\updates\promote-installer-${VERSION}.ready", i 0x40000000, i 0, p 0, i 1, i 0x80, p 0)p.r0'
+      ${If} $0 != -1
+        System::Call 'kernel32::CloseHandle(p r0)'
+        StrCpy $R7 "1"
+      ${EndIf}
+    ${EndIf}
   ${EndIf}
-  Delete "$R3"
+  ${If} $R9 != $R8
+  ${AndIf} $R7 != "1"
+    GetTempFileName $R3 "$INSTDIR\user-cache\updates"
+    StrCpy $2 $R3
+    System::Call 'kernel32::CopyFileW(w "$EXEPATH", w r2, i 0)i.r0'
+    ${If} $0 != 0
+      System::Call 'kernel32::MoveFileExW(w r2, w "$R8", i 9)i.r0'
+    ${EndIf}
+    Delete "$R3"
+  ${EndIf}
   ; Drop only the upstream duplicate after comparing it with the running setup.
   DetailPrint "$(WorkspaceCleanup)"
   GetFullPathName $R4 "$LOCALAPPDATA\${APP_INSTALLER_STORE_FILE}"
   ${If} ${FileExists} "$R4"
-  ${AndIf} $R4 != $EXEPATH
-    ${StdUtils.HashFile} $R5 "SHA2-256" "$EXEPATH"
-    ${StdUtils.HashFile} $R6 "SHA2-256" "$R4"
-    StrLen $R7 $R5
-    ${If} $R7 == 64
-    ${AndIf} $R5 == $R6
-      Delete "$R4"
-      ${StdUtils.GetParentPath} $R7 "$R4"
-      RMDir "$R7"
+  ${AndIf} $R4 != $R9
+  ${AndIf} $R4 != $R8
+    !insertmacro workspaceInstallerSize "$R9" $R6
+    !insertmacro workspaceInstallerSize "$R4" $R7
+    ${If} $R6 != ""
+    ${AndIf} $R6 == $R7
+      ${StdUtils.HashFile} $R5 "SHA2-256" "$R9"
+      ${StdUtils.HashFile} $R6 "SHA2-256" "$R4"
+      StrLen $R7 $R5
+      ${If} $R7 == 64
+      ${AndIf} $R5 == $R6
+        Delete "$R4"
+        ${StdUtils.GetParentPath} $R7 "$R4"
+        RMDir "$R7"
+      ${EndIf}
     ${EndIf}
   ${EndIf}
   ${If} $workspaceRestartDir != ""

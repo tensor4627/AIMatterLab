@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash,generateKeyPairSync,sign} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 import {gzipSync} from 'node:zlib';
 import {readSignedRelease,signingPayload,setupName,newerRelease} from '../../desktop/platform/update-release.mjs';
 import {createWorkspaceUpdater} from '../../desktop/platform/workspace-updater.mjs';
@@ -40,7 +41,7 @@ async function fixture(t) {
     return createWorkspaceUpdater({workspace,currentVersion:'0.1.7',fetchApi,decodeManifest:data=>readSignedRelease(data,publicKey),
       publish:s=>api.states.push(s),install:(...args)=>api.installs.push(args),quit:()=>api.quits++,...overrides});
   }
-  return {api,client,cache,bytes,workspace,info};
+  return {api,client,cache,bytes,workspace,info,oldMap};
 }
 
 test('a signed stable release reconstructs from just the changed range, survives an offline restart and installs in the originating workspace',async t=>{
@@ -56,6 +57,94 @@ test('a signed stable release reconstructs from just the changed range, survives
   const restarted=client();assert.equal((await restarted.check()).phase,'ready');
   await Promise.all([restarted.apply(),restarted.apply()]);
   assert.deepEqual(api.installs,[[path.join(cache,'pending.exe'),workspace.directory]]);assert.equal(api.quits,1);
+});
+
+test('a full download records its verified file and detects same-size edits even after mtime is restored',async t=>{
+  const {api,client,cache,bytes}=await fixture(t);
+  await fs.unlink(path.join(cache,'installer.exe'));
+  const updater=client(), pending=path.join(cache,'pending.exe');
+  assert.equal((await updater.check()).mode,'full');
+  assert.equal((await updater.download()).phase,'ready');
+  const saved=JSON.parse(await fs.readFile(path.join(cache,'pending.json'),'utf8'));
+  const original=await fs.stat(pending);
+  assert.equal(saved.installerReceipt.size,bytes.length);
+  assert.equal(saved.installerReceipt.mtimeMs,original.mtimeMs);
+  assert.ok(readSignedRelease(Buffer.from(JSON.stringify(saved)),publicKey));
+
+  await delay(20);
+  await fs.writeFile(pending,Buffer.alloc(bytes.length));
+  await fs.utimes(pending,original.atimeMs/1000,original.mtimeMs/1000);
+  assert.equal((await updater.apply()).reason,'retry');
+  assert.equal(api.installs.length,0);
+
+  api.offline=true;
+  assert.notEqual((await client().check()).phase,'ready');
+  await assert.rejects(fs.stat(pending),{code:'ENOENT'});
+});
+
+test('startup promotes the installer that just completed the desktop handoff without copying it',async t=>{
+  const {api,client,cache,bytes}=await fixture(t);
+  const pending=path.join(cache,'pending.exe'), base=path.join(cache,'installer.exe');
+  const marker=path.join(cache,'promote-installer-0.1.8.ready');
+  await fs.writeFile(pending,bytes);
+  await fs.writeFile(path.join(cache,'pending.json'),api.manifest);
+  await fs.writeFile(marker,'');
+  const source=await fs.stat(pending);
+  api.offline=true;
+  const updater=client({currentVersion:'0.1.8'});
+  await updater.check();
+  assert.equal((await fs.stat(base)).ino,source.ino);
+  assert.deepEqual(await fs.readFile(base),bytes);
+  for (const file of [pending,marker,path.join(cache,'pending.json')]) await assert.rejects(fs.stat(file),{code:'ENOENT'});
+  assert.equal(api.installs.length,0);
+});
+
+test('one action downloads and stages the compatible app layer before handing off without fetching an installer',async t=>{
+  const {api,client,info,cache}=await fixture(t);
+  const data=Buffer.from('application layer'), appPayload={url:'AIMatterLab-0.1.8-win-x64-app.gz',size:data.length,sha512:hash(data)};
+  api.response=url=>url.pathname.endsWith('/'+appPayload.url)?new Response(data):null;
+  let staged=false;
+  const updater=client({layered:{
+    restore:async()=>null,
+    installerVersion:async()=>'0.1.7',
+    candidate:async release=>release.version===info.version?appPayload:null,
+    stage:async (release,response,progress)=>{
+      assert.equal(release.version,info.version);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+      progress(data.length);
+      staged=true;
+    },
+    launch:async()=>{assert.equal(staged,true);assert.equal(api.quits,0);}
+  }});
+  const available=await updater.check();
+  assert.equal(available.mode,'app');
+  assert.equal(available.fullBytes,data.length);
+  assert.equal((await updater.update()).phase,'installing');
+  assert.equal(api.quits,1);
+  assert.equal(api.installs.length,0);
+  assert.deepEqual(api.requests.map(request=>new URL(request.url).pathname.split('/').at(-1)),['latest.yml',appPayload.url]);
+  await assert.rejects(fs.stat(path.join(cache,'pending.exe')),{code:'ENOENT'});
+});
+
+test('an app handoff failure retries with the original NSIS baseline after a previous app update',async t=>{
+  const {api,client,info,oldMap,bytes,cache}=await fixture(t);
+  const appPayload={url:'AIMatterLab-0.1.8-win-x64-app.gz',size:3,sha512:hash('app')};
+  api.response=url=>{
+    if (url.pathname.includes('/v0.1.6/') && url.pathname.endsWith('.blockmap')) return new Response(oldMap);
+    if (url.pathname.endsWith('/'+appPayload.url)) return new Response('app');
+  };
+  const updater=client({layered:{
+    restore:async()=>({...info,appPayload}),
+    installerVersion:async()=>'0.1.6',
+    launch:async()=>{throw Error('Windows locked the application layer');}
+  }});
+  assert.equal((await updater.check()).mode,'app');
+  assert.equal((await updater.update()).phase,'installing');
+  assert.equal(api.quits,1);
+  assert.ok(api.requests.some(request=>request.url.includes('/v0.1.6/') && request.url.endsWith('.blockmap')));
+  assert.ok(api.states.some(state=>state.reason==='app' && state.mode==='delta'));
+  assert.deepEqual(await fs.readFile(path.join(cache,'pending.exe')),bytes);
+  assert.equal(api.installs.length,1);
 });
 
 test('GitHub is checked first; a single user action downloads, verifies and starts exactly one installer',async t=>{

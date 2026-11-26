@@ -5,7 +5,7 @@ export interface UpdateState {
   currentVersion: string;
   sequence: number;
   version?: string;
-  mode?: 'delta'|'full';
+  mode?: 'app'|'delta'|'full';
   bytes?: number;
   received?: number;
   assembled?: number;
@@ -14,6 +14,6 @@ export interface UpdateState {
   step?: 'cache'|'manifest'|'blocks';
   issues?: {source:UpdateSource;status:number;webPage?:boolean}[];
   automatic?: boolean;
-  reason?: 'base'|'map'|'delta'|'retry';
+  reason?: 'app'|'base'|'map'|'delta'|'retry';
   detail?: string;
 }

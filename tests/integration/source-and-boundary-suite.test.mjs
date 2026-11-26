@@ -197,7 +197,9 @@ const {FileMatcher,copyFiles}=builder('app-builder-lib/out/fileMatcher.js');
 test('configured DSH extra resources survive actual builder copying with nested conflicting dependencies',async t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-package-copy-')),source=path.join(root,'source'),destination=path.join(root,'resources');t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const dsh='.studio/agent-runtimes/dsh',fixtures={
-  'runtime.json':'{"schemaVersion":1,"fixture":"owned offline package copy"}\n',
+  'runtime.json':'{"schemaVersion":2,"entry":"bundles/cli.mjs","fixture":"owned offline package copy"}\n',
+  'bundles/cli.mjs':'export const officialLauncher=true;\n',
+  'bundles/core.mjs':'export const sharedCore=true;\n',
   'node_modules/@deepseek-ai/dsh/package.json':'{"name":"@deepseek-ai/dsh","version":"0.2.2-rc.1"}',
   'node_modules/@deepseek-ai/dsh/lib/bin.js':'export const fixture=true;\n',
   'node_modules/@deepseek-ai/dsh/node_modules/shared/package.json':'{"name":"shared","version":"2.0.0"}',

@@ -4,12 +4,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {createRequire} from 'node:module';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {stageDshRuntime,validateStagedDshRuntime} from '../../scripts/stage-dsh-runtime.mjs';
 import {stageCoreRuntimes} from '../../scripts/stage-agents.mjs';
+import {resolveDshRuntime} from '../../desktop/platform/dsh-runtime.mjs';
 
 const roots=['@deepseek-ai/dsh','@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client','@deepseek-ai/dsh-llm-pi-ai'],version='0.2.2-rc.1';
-function fixture(){
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-stage-dsh-')),modules=path.join(root,'node_modules'),target=path.join(root,'.studio/agent-runtimes/dsh');fs.mkdirSync(modules,{recursive:true});
+function fixture({bundle=false}={}){
+ // Windows' sandbox allows temporary files while restricting directory reads of
+ // some temp ancestors that esbuild checks during module resolution.
+ const base=bundle?fileURLToPath(new URL('../../.studio/',import.meta.url)):os.tmpdir();
+ fs.mkdirSync(base,{recursive:true});
+ const root=fs.mkdtempSync(path.join(base,'studio-stage-dsh-')),modules=path.join(root,'node_modules'),target=path.join(root,'.studio/agent-runtimes/dsh');fs.mkdirSync(modules,{recursive:true});
  const app={name:'gpu-sampling-studio',devDependencies:Object.fromEntries(roots.map(name=>[name,version]))};
  fs.writeFileSync(path.join(root,'package.json'),JSON.stringify(app));
  const pkg=(name,values={},location=path.join(modules,name))=>{fs.mkdirSync(path.join(location,'lib'),{recursive:true});fs.writeFileSync(path.join(location,'package.json'),JSON.stringify({name,version:'1.0.0',main:'lib/index.js',...values}));fs.writeFileSync(path.join(location,'lib/index.js'),'module.exports = '+JSON.stringify(values.version||'1.0.0')+';');return location;};
@@ -82,7 +89,7 @@ test('native staging rejects a linked deletion target before modifying external 
 
 
 test('Studio profile projects only audited carrier edges, retaining implementation dependencies and peers unchanged',()=>{
- const f=fixture();try{
+ const f=fixture({bundle:true});try{
   f.change(roots[0],{dependencies:{commander:'1.0.0','@deepseek-ai/dsh-sdk-app':version,'unused-web-bundle':'1.0.0'}});
   f.change(roots[1],{dependencies:{'@deepseek-ai/dsh-sdk-app':version}});
   f.pkg('commander');f.pkg('@deepseek-ai/dsh-sdk-app',{version,dependencies:{'@deepseek-ai/dsh-cmdline':version,'unused-office-bundle':'1.0.0'},peerDependencies:{'required-peer':'1.0.0'}});
@@ -101,4 +108,77 @@ test('Studio profile projects only audited carrier edges, retaining implementati
 
 test('a changed official carrier version cannot silently reuse the audited Studio dependency projection',()=>{
  const f=fixture();try{for(const name of roots){f.app.devDependencies[name]='0.2.2-rc.2';f.change(name,{version:'0.2.2-rc.2'});}fs.writeFileSync(path.join(f.root,'package.json'),JSON.stringify(f.app));assert.throws(()=>stageDshRuntime({root:f.root,platform:'win32',arch:'x64'}),/new dependency audit/);}finally{f.close();}
+});
+
+test('Studio bundles retain the official entry, runtime-loaded assets, and shared exports',()=>{
+ const f=fixture({bundle:true});try{
+  f.change(roots[0],{type:'module',dependencies:{commander:'1.0.0'}});
+  f.change(roots[2],{dependencies:{'@deepseek-ai/dsh-tools':version}});
+  f.pkg('@deepseek-ai/dsh-tools',{version});
+  const cliDir=path.join(f.modules,roots[0],'lib');
+  fs.writeFileSync(path.join(cliDir,'bin.js'),"import {marker} from 'commander'; export async function runCli(){ console.log(marker + (await import('./lazy.js')).content); } if(import.meta.main) await runCli();");
+  fs.writeFileSync(path.join(cliDir,'lazy.js'),"import {readFileSync} from 'node:fs'; export const content=readFileSync(new URL('./prompt.md',import.meta.url),'utf8');");
+  fs.writeFileSync(path.join(cliDir,'prompt.md'),'runtime prompt');
+  const commander=f.pkg('commander',{type:'module',main:'index.js',exports:'./index.js'});
+  fs.writeFileSync(path.join(commander,'index.js'),"export {marker} from './lib/option.js';");
+  fs.writeFileSync(path.join(commander,'lib/option.js'),"export const marker='loaded ';");
+  const files={'LICENSE':'license text','README.md':'developer documentation','index.d.ts':'types','src/option.ts':'development TS','examples/example.js':'example','test/test.js':'tests'};
+  for(const [name,content] of Object.entries(files)){
+   const file=path.join(commander,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,content);
+  }
+  const manifest=stageDshRuntime({root:f.root,platform:'win32',arch:'x64'});
+  const runtime=resolveDshRuntime({resourcesPath:path.join(f.root,'.studio')});
+  assert.equal(runtime.args[1],path.join(f.target,manifest.entry));
+  assert.deepEqual(manifest.bundle.outputs.map(record=>record.path),['bundles/cli.mjs','bundles/core.mjs']);
+  for(const entry of [manifest.entry,'node_modules/@deepseek-ai/dsh/lib/bin.js']){
+   const result=spawnSync(process.execPath,[path.join(f.target,entry)],{encoding:'utf8',windowsHide:true});
+   assert.equal(result.status,0,result.stderr);
+   assert.equal(result.stdout.trim(),'loaded runtime prompt');
+  }
+  const installed=path.join(f.target,'node_modules/commander');
+  for(const name of ['README.md','index.d.ts','src','examples','test','lib/option.js'])assert(!fs.existsSync(path.join(installed,name)),name);
+  assert.equal(fs.readFileSync(path.join(installed,'LICENSE'),'utf8'),'license text');
+  f.validate();
+  fs.appendFileSync(runtime.args[1],'//modified');
+  assert.throws(f.validate,/differs from integrity receipt/);
+ }finally{f.close();}
+});
+
+test('shared Zod bundles preserve both Node module modes and wildcard locale exports',()=>{
+ const f=fixture({bundle:true});try{
+  f.change(roots[2],{dependencies:{zod:'4.4.3'}});
+  const zod=f.pkg('zod',{version:'4.4.3',type:'module',main:'index.cjs',exports:{
+   '.':{'@zod/source':'./src/index.ts',types:'./index.d.ts',import:'./index.js',require:'./index.cjs'},
+   './compile':{import:'./compile.js',require:'./compile.cjs'},
+   './v4/core':{import:'./v4/core/index.js',require:'./v4/core/index.cjs'},
+   './v4/locales/*':{import:'./v4/locales/*',require:'./v4/locales/*'},
+  }});
+  const sources={
+   'index.js':"export {schema} from './lib/private.js';",
+   'index.cjs':"exports.schema = require('./lib/private.cjs').schema;",
+   'lib/private.js':"export const schema='es';",
+   'lib/private.cjs':"exports.schema = 'common';",
+   'compile.js':"import {enable} from './v4/core/compile.js'; enable();",
+   'compile.cjs':"require('./v4/core/compile.cjs').enable();",
+   'v4/core/index.js':"export const config={compile:false};",
+   'v4/core/index.cjs':"exports.config={compile:false};",
+   'v4/core/compile.js':"import {config} from './index.js'; export const enable=()=>{config.compile=true;};",
+   'v4/core/compile.cjs':"exports.enable=()=>{require('./index.cjs').config.compile=true;};",
+   'v4/locales/en.js':"export const label='English';",
+   'v4/locales/en.cjs':"exports.label = 'English CJS';",
+   'src/index.ts':"export const schema: string = 'dev';",
+  };
+  for(const [name,content] of Object.entries(sources)){
+   const file=path.join(zod,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,content);
+  }
+  const manifest=stageDshRuntime({root:f.root,platform:'win32',arch:'x64'});
+  assert(manifest.bundle.outputs.some(output=>output.path==='bundles/zod-4.4.3.mjs'));
+  assert(manifest.bundle.outputs.some(output=>output.path==='bundles/zod-4.4.3.cjs'));
+  const inline="import {schema} from 'zod'; import {label} from 'zod/v4/locales/en.cjs'; import {config} from 'zod/v4/core'; import {createRequire} from 'node:module'; const require=createRequire(import.meta.url); const cjs=require('zod/v4/core').config; console.log(schema,require('zod').schema,label,config.compile,cjs.compile); await import('zod/compile'); require('zod/compile'); console.log(config.compile,cjs.compile);";
+  const result=spawnSync(process.execPath,['--input-type=module','--eval',inline],{cwd:path.join(f.target,'bundles'),encoding:'utf8',windowsHide:true});
+  assert.equal(result.status,0,result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/),['es common English CJS false false','true true']);
+  for(const name of ['lib/private.js','lib/private.cjs','src/index.ts'])assert(!fs.existsSync(path.join(f.target,'node_modules/zod',name)),name);
+  f.validate();
+ }finally{f.close();}
 });

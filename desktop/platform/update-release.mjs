@@ -5,7 +5,13 @@ const publisher = new X509Certificate(readFileSync(new URL('../../contracts/upda
 const stable = /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/;
 const digest = /^[A-Za-z0-9+/]{86}==$/;
 export const setupName = version => `AIMatterLab-${version}-win-x64-setup.exe`;
+export const appPayloadName = version => `AIMatterLab-${version}-win-x64-app.gz`;
 export const maxBlockmap = 8 * 1024 * 1024;
+export const maxAppPayload = 64 * 1024 * 1024;
+export const maxReleaseManifest = 32 * 1024;
+export const validReleaseVersion = value => typeof value === 'string' && stable.test(value);
+export const validRuntimeAbi = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+export const validSha512 = value => typeof value === 'string' && digest.test(value);
 export const publisherThumbprint = publisher.fingerprint.replaceAll(':','');
 
 export function newerRelease(version, current) {
@@ -27,11 +33,29 @@ export function signingPayload(info) {
   return Buffer.from(JSON.stringify(['AIMatterLab Windows x64 v1', info.version, file.url, file.size, file.sha512, map.size, map.sha512]));
 }
 
+// The extension is bound to the verified NSIS release. Older clients still verify v1.
+export function appPayloadSigningPayload(info) {
+  const {runtimeAbiVersion, appPayload} = info;
+  if (!validRuntimeAbi(runtimeAbiVersion) || appPayload?.url !== appPayloadName(info.version) ||
+      !Number.isSafeInteger(appPayload.size) || appPayload.size < 1 || appPayload.size > maxAppPayload ||
+      !validSha512(appPayload.sha512)) throw Error('Invalid application payload metadata');
+  return Buffer.from(JSON.stringify(['AIMatterLab application payload v1', signingPayload(info).toString('utf8'),
+    runtimeAbiVersion, appPayload.url, appPayload.size, appPayload.sha512]));
+}
+
 export function readSignedRelease(bytes, publicKey = publisher.publicKey) {
-  if (Buffer.byteLength(bytes) > 32 * 1024) throw Error('Release manifest is too large');
+  if (Buffer.byteLength(bytes) > maxReleaseManifest) throw Error('Release manifest is too large');
   const info = JSON.parse(bytes.toString('utf8'));
   if (typeof info.signature !== 'string' || !verify('sha256', signingPayload(info), publicKey, Buffer.from(info.signature,'base64'))) throw Error('Release signature verification failed');
-  return info;
+  const {runtimeAbiVersion, appPayload, appPayloadSignature, ...installer} = info;
+  try {
+    if (typeof appPayloadSignature === 'string' &&
+        verify('sha256', appPayloadSigningPayload(info), publicKey, Buffer.from(appPayloadSignature,'base64'))) {
+      const {url, size, sha512} = appPayload;
+      return {...installer, runtimeAbiVersion, appPayload:{url,size,sha512}, appPayloadSignature};
+    }
+  } catch { /* An invalid optional extension can only disable the application payload. */ }
+  return installer;
 }
 
 export async function fileDigest(file, algorithm = 'sha512', encoding = 'base64') {

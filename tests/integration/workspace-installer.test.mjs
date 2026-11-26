@@ -19,7 +19,7 @@ function fixture(t){
  create(payload,'AIMatterLab.exe');create(payload,'resources/app.asar');create(payload,'resources/sub/part.bin');
  fs.writeFileSync(manifest,workspaceManifest(payload));
  const run=mode=>spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script,'-Mode',mode,'-Workspace',workspace,'-Manifest',manifest],{encoding:'utf8',windowsHide:true,timeout:45000});
- return {payload,workspace,run};
+ return {payload,workspace,run,manifest};
 }
 test('Windows release uses an assisted setup and a direct workspace directory selection',()=>{
  assert.deepEqual(pkg.build.win.target,['nsis','zip']);assert.equal(pkg.build.nsis.oneClick,false);
@@ -46,6 +46,43 @@ test('install, update and uninstall preserve unknown files, profiles, cache, sou
  for(const name of paths)assert.equal(fs.readFileSync(path.join(workspace,name),'utf8'),'user data');
  assert.equal(fs.existsSync(path.join(workspace,'AIMatterLab.exe')),false);
  assert.equal(fs.existsSync(path.join(workspace,'resources','sub')),false);
+});
+test('uninstall and full upgrade track hot-owned files and preserve a user file at a retired path',{skip:process.platform!=='win32'},t=>{
+ const {payload,workspace,run,manifest}=fixture(t);
+ const recordName='resources/studio-updater/app-files.txt';
+ const retired='resources/studio-skills/retired.md',current='resources/studio-skills/current.md';
+ create(payload,retired);
+ create(payload,recordName,'D|resources\\studio-skills\nF|resources\\studio-skills\\retired.md\nF|resources\\app.asar\n');
+ fs.writeFileSync(manifest,workspaceManifest(payload));
+ const installed=run('Install');
+ assert.equal(installed.status,0,installed.stderr);
+ fs.cpSync(payload,workspace,{recursive:true});
+ create(workspace,recordName,'D|resources\\studio-skills\nF|resources\\studio-skills\\current.md\nF|resources\\app.asar\n');
+ create(workspace,retired,'user file at retired program path');
+ create(workspace,current,'hot-owned program');
+ for(const personal of ['sources/engine/README','user-cache/notes.txt','AGENTS.md'])create(workspace,personal,'personal');
+
+ const revalidated=run('Install');assert.equal(revalidated.status,0,revalidated.stderr);
+ const removed=run('Remove');assert.equal(removed.status,0,removed.stderr);
+ assert.equal(fs.existsSync(path.join(workspace,current)),false);
+ assert.equal(fs.existsSync(path.join(workspace,recordName)),false);
+ assert.equal(fs.readFileSync(path.join(workspace,retired),'utf8'),'user file at retired program path');
+ for(const personal of ['sources/engine/README','user-cache/notes.txt','AGENTS.md'])assert.equal(fs.readFileSync(path.join(workspace,personal),'utf8'),'personal');
+});
+test('an installed hot file list cannot add user, traversal, or native paths to uninstall ownership',{skip:process.platform!=='win32'},t=>{
+ const {payload,workspace,run,manifest}=fixture(t);
+ const recordName='resources/studio-updater/app-files.txt', baseline='F|resources\\app.asar\n';
+ create(payload,recordName,baseline);
+ fs.writeFileSync(manifest,workspaceManifest(payload));
+ assert.equal(run('Install').status,0);
+ fs.cpSync(payload,workspace,{recursive:true});
+ create(workspace,'AGENTS.md','personal');
+ for(const name of ['AGENTS.md','resources\\studio-skills\\..\\..\\AGENTS.md','resources\\studio-skills\\unexpected.node']){
+  create(workspace,recordName,baseline+'F|'+name+'\n');
+  const blocked=run('Remove');assert.notEqual(blocked.status,0);
+  assert.match(blocked.stderr,/Invalid application update program path/);
+  assert.equal(fs.readFileSync(path.join(workspace,'AGENTS.md'),'utf8'),'personal');
+ }
 });
 test('unrelated conflicting packages and linked program folders cannot claim a workspace',{skip:process.platform!=='win32'},t=>{
  const {workspace,payload,run}=fixture(t);

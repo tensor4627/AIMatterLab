@@ -33,6 +33,17 @@ test('standalone pnpm layout stages the wrapper-scoped native dependency without
  assert.equal(fs.lstatSync(path.join(target,f.native)).isSymbolicLink(),false);assert(fs.existsSync(path.join(target,f.native,'lib/index.js')));assert.equal(fs.existsSync(path.join(target,f.native,'debug.pdb')),false);assert.equal(fs.existsSync(path.join(target,f.native,'source.js.map')),false);
 });
 
+test('staging keeps the selected prebuild and notices and drops non-runtime package files',t=>{
+ const f=fixture(t);
+ const inputs=['prebuilds/win32-x64/conpty.node','prebuilds/win32-arm64/conpty.node','lib/index.d.mts','README.en.md','LICENSE','docs/sample.js','src/source.ts'];
+ for(const name of inputs){
+  const target=path.join(f.nativeRoot,name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'fixture-owned bytes');
+ }
+ stageCoreRuntimes({root:f.root,platform:'win32',arch:'x64'});
+ const output=path.join(f.root,'.studio/agent-runtimes/node_modules',f.native);
+ for(const name of inputs)assert.equal(fs.existsSync(path.join(output,name)),['prebuilds/win32-x64/conpty.node','LICENSE'].includes(name),name);
+});
+
 test('staging refuses a dependency resolved outside its checkout instead of silently borrowing an ancestor',t=>{
  const f=fixture(t),external=fs.mkdtempSync(path.join(os.tmpdir(),'studio-external-pty-'));t.after(()=>fs.rmSync(external,{recursive:true,force:true}));
  fs.cpSync(f.nativeRoot,external,{recursive:true});unlinkJunction(path.join(f.wrapperRoot,'..','node-pty-win32-x64'));f.link(external,path.join(f.wrapperRoot,'..','node-pty-win32-x64'));

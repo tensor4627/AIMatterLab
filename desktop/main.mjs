@@ -8,6 +8,8 @@ import {managedProjectAccess} from '../backend/main/compute/managed-project-acce
 import {agentApprovalMode,developerComputeAccess} from '../backend/main/compute/developer-compute-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
+import {acknowledgeLayeredStartup,createLayeredWorkspaceUpdate} from './platform/layered-update.mjs';
+import {startupArgument as layeredStartupArgument} from './platform/app-update-helper.mjs';
 import {createUpdateAccess,validateUpdateSource} from './platform/update-feeds.mjs';
 import {electronUpdateFetch} from './platform/update-http.mjs';
 import {createCliRuntimeManager,migrateBundledCliPaths} from './platform/cli-runtimes.mjs';
@@ -165,6 +167,7 @@ const installationVerifying=process.argv.includes('--studio-install-verify');
 const improvementsVerifying=process.argv.includes('--studio-improvements-verify');
 const providerVerifying=process.argv.includes('--studio-providers-verify');
 const verifying=installationVerifying||improvementsVerifying||providerVerifying||process.argv.includes('--studio-verify');
+const layeredStartupRequested=process.argv.some(value=>value.startsWith(layeredStartupArgument));
 const verificationRoot=process.env.STUDIO_VERIFY_ROOT||root;
 const workspace=!verifying&&!process.env.STUDIO_PROFILE_DIR?installedWorkspace({isPackaged:app.isPackaged,execPath:process.execPath}):null;
 if(process.env.STUDIO_PROFILE_DIR)app.setPath('userData',path.resolve(process.env.STUDIO_PROFILE_DIR));
@@ -177,7 +180,9 @@ let shuttingDown=false,desktopShutdown;
 const attentionBalloons=new Set();
 const agentConnectAttempts=new Map();
 const updateAccess=createUpdateAccess(new CredentialVault(path.join(app.getPath('userData'),'update-access'),safeStorage,validateUpdateSource));
-const updater=createWorkspaceUpdater({workspace:process.platform==='win32'&&process.arch==='x64'?workspace:null,currentVersion:app.getVersion(),
+const updateWorkspace=process.platform==='win32'&&process.arch==='x64'?workspace:null;
+const layered=updateWorkspace?createLayeredWorkspaceUpdate({workspace:updateWorkspace,currentVersion:app.getVersion()}):null;
+const updater=createWorkspaceUpdater({workspace:updateWorkspace,layered,currentVersion:app.getVersion(),
   fetchApi:(url,options)=>electronUpdateFetch(net,url,{...options,version:app.getVersion()}),tokenFor:updateAccess.token,install:launchWorkspaceUpdate,quit:()=>app.quit(),
   publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
@@ -1020,6 +1025,7 @@ const loaded=await loadRecoverableWorkbench({
   catch{console.error('Could not record renderer exit',reason,exitCode);}
  },
  askRetry:async()=>{
+  if(layeredStartupRequested){app.exit(1);return false;}
   const en=settings.language==='en',options={type:'warning',title:PRODUCT_NAME,
    message:en?'The workbench could not be displayed.':'工作台画面未能恢复。',
    detail:en?'Reload the workbench now, or open it from the tray to try again later.':'可以立即重新加载，也可以稍后从系统托盘打开 AIMatterLab 重试。',
@@ -1030,6 +1036,7 @@ const loaded=await loadRecoverableWorkbench({
 });
 if(!loaded||shuttingDown)return;
 performanceTimeline.mark('window-loaded');
+await acknowledgeLayeredStartup(workspace,app.getVersion(),window.webContents);
 if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});await desktopShutdown.run();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
 if(workspace){const timer=setTimeout(()=>{if(!shuttingDown&&updater.snapshot().phase==='idle')void updater.check();},4000);timer.unref();}
@@ -1050,5 +1057,5 @@ if(!app.requestSingleInstanceLock()){
   }
   await configureNetworkSession(session.defaultSession,network);
   return initialize();
- }).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
+ }).catch(async error=>{console.error(error);const log=path.join(app.getPath('userData'),'startup-error.log');try{fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,new Date().toISOString()+' '+String(error.stack||error)+'\n');if(!layeredStartupRequested)dialog.showErrorBox(PRODUCT_NAME+' 启动失败','项目与连接配置已保留。请查看诊断日志：\n'+log);}catch{}await desktopShutdown?.run();app.exit(1);});
 }

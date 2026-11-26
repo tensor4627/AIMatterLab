@@ -1,10 +1,10 @@
 {
   "name": "aimatterlab",
   "productName": "AIMatterLab",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "type": "module",
-  "main": "desktop/main.mjs",
+  "main": "desktop/entry.mjs",
   "scripts": {
     "source": "node scripts/source-start.mjs",
     "dev": "node scripts/stage-agents.mjs && node scripts/build-cli-installer.mjs && node scripts/sync-tool-contracts.mjs --check && node scripts/dev.mjs",
@@ -55,6 +55,7 @@
     "@vitejs/plugin-react": "4.3.4",
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
+    "esbuild": "0.25.12",
     "playwright": "1.65.0",
     "tar": "7.5.22",
     "typescript": "5.7.3",
@@ -66,7 +67,7 @@
     "beforeBuild": "scripts/package-runtime.mjs",
     "afterPack": "scripts/workspace-installer-files.mjs",
     "directories": {
-      "output": "release/v0.2.9"
+      "output": "release/v0.2.10"
     },
     "files": [
       "dist/**",
@@ -146,6 +147,13 @@
       {
         "from": ".studio/agent-runtimes/dsh/runtime.json",
         "to": "agent-runtimes/dsh/runtime.json"
+      },
+      {
+        "from": ".studio/agent-runtimes/dsh/bundles",
+        "to": "agent-runtimes/dsh/bundles",
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": ".studio/agent-runtimes/dsh/node_modules",

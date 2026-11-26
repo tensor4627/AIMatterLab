@@ -30,7 +30,7 @@ function fixture(t){
  write('contracts/agent/cli-runtime-lock.json',JSON.parse(fs.readFileSync(new URL('../../contracts/agent/cli-runtime-lock.json',import.meta.url),'utf8')));
  const prefix='.studio/agent-runtimes/node_modules/',packages={};
  function pkg(name,metadata,files){packages[name]=metadata.version;write(prefix+name+'/package.json',{name,...metadata});for(const [name2,text]of Object.entries(files))write(prefix+name+'/'+name2,text);}
- pkg('@lydell/node-pty',{version:'1.2.0-beta.10',exports:'./index.js',dependencies:{ws:'^8.18.0'},optionalDependencies:{'@lydell/node-pty-win32-x64':'1.2.0-beta.10','@lydell/node-pty-linux-x64':'1.2.0-beta.10'}},{'index.js':'module.exports={};'});
+ pkg('@lydell/node-pty',{version:'1.2.0-beta.10',exports:{'.':{types:'./index.d.ts',default:'./index.js'}},dependencies:{ws:'^8.18.0'},optionalDependencies:{'@lydell/node-pty-win32-x64':'1.2.0-beta.10','@lydell/node-pty-linux-x64':'1.2.0-beta.10'}},{'index.js':'module.exports={};'});
  pkg('@lydell/node-pty-win32-x64',{version:'1.2.0-beta.10',os:['win32'],cpu:['x64'],exports:'./lib/index.js'},Object.fromEntries(['lib/index.js','lib/windowsTerminal.js','lib/windowsPtyAgent.js','lib/windowsConoutConnection.js','lib/worker/conoutSocketWorker.js','lib/conpty_console_list_agent.js','prebuilds/win32-x64/conpty.node','prebuilds/win32-x64/conpty_console_list.node','prebuilds/win32-x64/conpty/conpty.dll','prebuilds/win32-x64/conpty/OpenConsole.exe'].map(file=>[file,'test fixture only; never executed'])));
  pkg('ws',{version:'8.22.0',exports:{'.':{import:'./wrapper.mjs',require:'./index.cjs'}}},{'wrapper.mjs':'export default {};','index.cjs':'module.exports={};'});
  const manifest='.studio/agent-runtimes/manifest.json';write(manifest,{scope:'test-only runtime',packages});
@@ -78,6 +78,16 @@ test('cross-target native package and missing native helper are rejected without
  const f=fixture(t);assert.throws(()=>validatePackageRuntime({appDir:f.root,platform:{nodeName:'linux'},arch:'x64'}),/Staged PTY platform package missing/);
  fs.unlinkSync(path.join(f.root,f.prefix,'@lydell/node-pty-win32-x64/prebuilds/win32-x64/conpty/OpenConsole.exe'));
  assert.throws(f.validate,/Package runtime file missing/);
+});
+
+test('packaging rejects a stale native prebuild or declaration even if its manifest is unchanged',t=>{
+ const f=fixture(t);
+ for(const name of ['prebuilds/win32-arm64/conpty.node','lib/index.d.cts']){
+  const target=f.write(f.prefix+'@lydell/node-pty-win32-x64/'+name,'unexpected installed file');
+  assert.throws(f.validate,/Unexpected staged native runtime file/);
+  fs.unlinkSync(target);
+ }
+ assert(f.validate().nativeFiles>0);
 });
 
 test('base package rejects any bundled provider CLI',t=>{

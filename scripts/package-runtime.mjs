@@ -4,7 +4,7 @@ import {createRequire,isBuiltin} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import ts from 'typescript';
 import {validateCliRuntimeLock} from '../backend/main/compute/cli-runtime.mjs';
-import {validateStagedDshRuntime} from './stage-dsh-runtime.mjs';
+import {runtimePackageFilter,validateStagedDshRuntime} from './stage-dsh-runtime.mjs';
 
 const buildRequire=createRequire(import.meta.url);
 // app-builder-lib belongs to electron-builder, not the application root.
@@ -73,6 +73,7 @@ export function validateApplicationImports(appDir){
    }
    function check(specifier,externalPty=false){
     if(specifier.startsWith('.')||specifier.startsWith('file:')||isBuiltin(specifier)||specifier==='electron')return;
+    if(specifier==='original-fs'&&name==='desktop/platform/app-update-transaction.mjs')return;
     if(externalPty&&specifier==='@lydell/node-pty'&&name==='desktop/platform/terminal-service/broker.mjs')return;
     throw Error('Application package requires unstaged bare module '+specifier+' in '+name);
    }
@@ -131,7 +132,9 @@ function validateDeclaredEntries(pkg,root){
  if(typeof pkg.module==='string')entries.push(pkg.module);
  function exported(value){
   if(typeof value==='string'){if(!value.includes('*'))entries.push(value);}
-  else if(value&&typeof value==='object')for(const child of Object.values(value))exported(child);
+  else if(value&&typeof value==='object')for(const [condition,child] of Object.entries(value)){
+   if(!/^types(?:$|@)/.test(condition))exported(child);
+  }
  }
  exported(pkg.exports);
  for(const entry of entries){
@@ -140,6 +143,26 @@ function validateDeclaredEntries(pkg,root){
   catch{throw Error('Staged package entry missing: '+pkg.name+' -> '+entry);}
   file(root,path.relative(root,resolved));
  }
+}
+
+function validateNativeFiles(modules,packages,platform,arch){
+ const include=new Map(Array.from(packages,([name,{pkg,source}])=>[name,runtimePackageFilter(pkg,path.dirname(source),platform,arch)]));
+ let files=0;
+ function walkNative(directory){
+  for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
+   const target=path.join(directory,entry.name);
+   if(entry.isSymbolicLink())throw Error('Linked staged native runtime file: '+target);
+   if(entry.isDirectory())walkNative(target);
+   else if(entry.isFile()){
+    const parts=relative(modules,target).split('/'),packageParts=parts[0].startsWith('@')?2:1;
+    const filter=include.get(parts.slice(0,packageParts).join('/')),name=parts.slice(packageParts).join('/');
+    if(!filter||!name||!filter(name))throw Error('Unexpected staged native runtime file: '+relative(modules,target));
+    files++;
+   }else throw Error('Unsupported staged native runtime file: '+target);
+  }
+ }
+ walkNative(modules);
+ return files;
 }
 
 export function validatePackageRuntime({appDir,platform,arch}={}){
@@ -176,7 +199,8 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
  }
  for(const name of ['@moonshot-ai/kimi-code','@qwen-code/qwen-code'])if(packages.has(name)||fs.existsSync(path.join(modules,name)))throw Error('Provider CLI must not be bundled in the base portable package: '+name);
  const native='@lydell/node-pty-'+platform+'-'+arch,nativeRecord=packages.get(native),pty=packages.get('@lydell/node-pty').pkg;
- if(!nativeRecord||nativeRecord.pkg.version!==pty.version||!nativeRecord.pkg.os?.includes(platform)||!nativeRecord.pkg.cpu?.includes(arch))throw Error('Staged PTY platform package missing or incompatible: '+native);
+ if(!nativeRecord||nativeRecord.pkg.version!==pty.version||!nativeRecord.pkg.os?.includes(platform)||!nativeRecord.pkg.cpu?.includes(arch)||manifest.platform!==undefined&&manifest.platform!==platform||manifest.arch!==undefined&&manifest.arch!==arch)throw Error('Staged PTY platform package missing or incompatible: '+native);
+ if([...packages.keys()].some(name=>name.startsWith('@lydell/node-pty-')&&name!==native))throw Error('Staged PTY contains a second native target');
  const nativeRoot=path.dirname(nativeRecord.source);file(nativeRoot,'lib/index.js');
  const prebuild=path.join('prebuilds',platform+'-'+arch);
  if(platform==='win32'){
@@ -199,14 +223,15 @@ export function validatePackageRuntime({appDir,platform,arch}={}){
    if(fs.realpathSync(resolveStagedManifest(dependency,source,modules))!==fs.realpathSync(target.source))throw Error('Optional staged dependency identity mismatch: '+dependency);
   }
  }
+ const nativeFiles=validateNativeFiles(modules,packages,platform,arch);
  const sourceFiles=validateApplicationImports(appDir);
  const dshVersion=app.devDependencies?.['@deepseek-ai/dsh'];let dsh;
  if(dshVersion){
-  if(['@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client'].some(name=>app.devDependencies?.[name]!==dshVersion))throw Error('Official DSH runtime versions disagree');
-  dsh=validateStagedDshRuntime(path.join(appDir,'.studio','agent-runtimes','dsh'),{expectedVersion:dshVersion,platform,arch});
+  if(['@deepseek-ai/dsh-sdk-minimal','@deepseek-ai/dsh-mcp-client','@deepseek-ai/dsh-llm-pi-ai'].some(name=>app.devDependencies?.[name]!==dshVersion))throw Error('Official DSH runtime versions disagree');
+  dsh=validateStagedDshRuntime(path.join(runtime,'dsh'),{expectedVersion:dshVersion,expectedEsbuildVersion:app.devDependencies?.esbuild,requireBundle:true,platform,arch});
   file(appDir,'agent/providers/dsh-policy.mjs');
  }
- return {...release,electronVersion,platform,arch,runtimePackages:packages.size,dependencyEdges,omittedOptional,distAssets,sourceFiles,nativePackage:native,...dsh?{dsh}: {}};
+ return {...release,electronVersion,platform,arch,runtimePackages:packages.size,dependencyEdges,omittedOptional,distAssets,sourceFiles,nativePackage:native,nativeFiles,...dsh?{dsh}: {}};
 }
 
 /** Release labels must agree before validation can describe one concrete package. */

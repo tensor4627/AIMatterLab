@@ -169,8 +169,8 @@ export function nativeHarnessSource(config){
 
 export function prepareNativeConversationCheck({repoRoot=desktopRoot,out,timeoutMs=90000}){
  const root=path.resolve(repoRoot),target=freshNativeCheckPath(root,out),pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
- if(pkg.main!=='desktop/main.mjs'||typeof pkg.version!=='string')throw Error('Expected the AIMatterLab checkout package');
- const main=path.join(root,pkg.main),preload=path.join(root,'desktop/preload.cjs'),index=path.join(root,'dist/index.html');
+ if(!['desktop/entry.mjs','desktop/main.mjs'].includes(pkg.main)||typeof pkg.version!=='string')throw Error('Expected the AIMatterLab checkout package');
+ const main=path.join(root,'desktop/main.mjs'),preload=path.join(root,'desktop/preload.cjs'),index=path.join(root,'dist/index.html');
  for(const file of [main,preload,index])if(!fs.statSync(file).isFile())throw Error('Required native acceptance input missing: '+file);
  const preloadBinding=mainPreloadBinding(fs.readFileSync(main,'utf8')),mainSha256=createHash('sha256').update(fs.readFileSync(main)).digest('hex'),preloadSha256=createHash('sha256').update(fs.readFileSync(preload)).digest('hex');
  const files=[];

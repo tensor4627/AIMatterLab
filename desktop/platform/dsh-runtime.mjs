@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {agentEnvironment} from './agent-environment.mjs';
 import {attachmentLimits} from '../../contracts/agent/chat-attachments.mjs';
+import {DSH_RUNTIME_LAYOUT} from '../../contracts/agent/dsh-runtime-layout.mjs';
 
 export const DSH_VERSION='0.2.2-rc.1';
 const appRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
@@ -12,18 +13,31 @@ const packagedResources=appRoot.endsWith('.asar')?process.resourcesPath:undefine
 const sourcePolicyPath=path.resolve(appRoot,'agent/providers/dsh-policy.mjs');
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 
+function stagedEntry(root,packaged){
+ const layout=DSH_RUNTIME_LAYOUT,manifest=path.join(root,'runtime.json');
+ if(fs.existsSync(manifest)){
+  const runtime=JSON.parse(fs.readFileSync(manifest,'utf8'));
+  if(runtime.version===DSH_VERSION&&runtime.schemaVersion===layout.schemaVersion&&runtime.profile===layout.studioProfile&&runtime.entry===layout.bundledEntry)return path.join(root,layout.bundledEntry);
+  if(!packaged&&runtime.version===DSH_VERSION&&runtime.entry===layout.cliEntry&&(runtime.schemaVersion===1||runtime.schemaVersion===layout.schemaVersion&&runtime.profile==='full'))return path.join(root,layout.cliEntry);
+ }else if(!packaged)return path.join(root,layout.cliEntry);
+ throw Error('官方 DeepSeek Harness 组件不完整；请重新配置模型运行组件');
+}
+
 /** Only an AIMatterLab-staged, pinned official installation is used; never the user's DSH home. */
 export function resolveDshRuntime({resourcesPath=packagedResources,projectRoot=appRoot,executable}={}){
- const roots=resourcesPath?[path.join(resourcesPath,'agent-runtimes','dsh','node_modules')]:[path.join(projectRoot,'.studio','agent-runtimes','dsh','node_modules'),path.join(projectRoot,'node_modules')];
+ const staged=resourcesPath?path.join(resourcesPath,'agent-runtimes','dsh'):path.join(projectRoot,'.studio','agent-runtimes','dsh');
+ const roots=resourcesPath?[staged]:[staged,projectRoot];
  for(const root of roots){
-  const directory=path.join(root,'@deepseek-ai','dsh'),entry=executable||path.join(directory,'lib','bin.js'),manifest=path.join(directory,'package.json');
-  if(!fs.existsSync(manifest)||!fs.existsSync(entry))continue;
+  const modules=path.join(root,'node_modules'),manifest=path.join(modules,'@deepseek-ai','dsh','package.json');
+  if(!fs.existsSync(manifest))continue;
   const pkg=JSON.parse(fs.readFileSync(manifest,'utf8'));
   if(pkg.name!=='@deepseek-ai/dsh'||pkg.version!==DSH_VERSION)throw Error('官方 DeepSeek Harness 版本不匹配；请重新配置 AIMatterLab 的模型运行组件');
-  const mcpModule=path.join(root,'@deepseek-ai','dsh-mcp-client','lib','index.js');let toolsModule;
+  const entry=executable||(root===staged?stagedEntry(root,Boolean(resourcesPath)):path.join(projectRoot,DSH_RUNTIME_LAYOUT.cliEntry));
+  if(!fs.existsSync(entry))continue;
+  const mcpModule=path.join(modules,'@deepseek-ai','dsh-mcp-client','lib','index.js');let toolsModule;
   try{toolsModule=createRequire(fs.realpathSync(mcpModule)).resolve('@deepseek-ai/dsh-tools');}catch{throw Error('官方 DeepSeek Harness 组件不完整；请重新配置模型运行组件');}
   if(!fs.existsSync(mcpModule)||!fs.existsSync(toolsModule))throw Error('官方 DeepSeek Harness 组件不完整；请重新配置模型运行组件');
-  return {file:process.execPath,args:['--expose-internals',entry],version:pkg.version,mcpModule:pathToFileURL(mcpModule).href,toolsModule:pathToFileURL(toolsModule).href,policyPath:resourcesPath?path.join(resourcesPath,'studio-dsh','dsh-policy.mjs'):sourcePolicyPath};
+  return {file:process.execPath,args:['--expose-internals',entry],version:pkg.version,modules,mcpModule:pathToFileURL(mcpModule).href,toolsModule:pathToFileURL(toolsModule).href,policyPath:resourcesPath?path.join(resourcesPath,'studio-dsh','dsh-policy.mjs'):sourcePolicyPath};
  }
  throw Error('尚未配置官方 DeepSeek Harness；请运行 AIMatterLab 配置或重新安装包含模型运行组件的完整包');
 }
@@ -67,10 +81,10 @@ export function prepareApiDshProfile(root,runtime,worker,instructions,selection)
  const adapterProfile={displayName:selection.profile.name,api:selection.profile.api,baseURL:selection.profile.api==='anthropic-messages'?selection.profile.baseUrl.replace(/\/v1$/,''):selection.profile.baseUrl,apiKeyEnv:'STUDIO_MODEL_API_KEY',models,retryPolicy:{mode:'normal',maxRetries:0},defaultContextWindow:32768,defaultMaxTokens:8192};
  const entries=kernel.filter(([id])=>!['llm-deepseek','deepseek-llm-api-extensions','session-log-deepseek'].includes(id)).map(([id,name,config])=>({id,name:name.startsWith('@')?name:'@deepseek-ai/'+name,...config?{config}:{}}));
  const compaction=entries.find(v=>v.id==='compaction-basic');if(compaction)compaction.config={headroomTokens:2048,maxTokens:4096};
- const adapterPath=path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-pi-ai/lib/index.js');
+ const adapterPath=path.join(runtime.modules,'@deepseek-ai/dsh-llm-pi-ai/lib/index.js');
  if(selection.profile.authMode==='deepseek-account'){
   if(selection.profile.baseUrl!=='https://api.deepseek.com/anthropic'||selection.profile.api!=='anthropic-messages'||selection.provider!=='compatible')throw Error('Invalid DeepSeek account profile');
-  entries.push({id:'models',name:path.join(appRoot,'agent/providers/dsh-account-adapter.mjs'),inject:['llm'],config:{route,displayName:selection.profile.name,baseUrl:selection.profile.baseUrl,models:selection.profile.models,module:path.resolve(path.dirname(runtime.args[1]),'../../../@deepseek-ai/dsh-llm-deepseek/lib/index.js')}});
+  entries.push({id:'models',name:path.join(appRoot,'agent/providers/dsh-account-adapter.mjs'),inject:['llm'],config:{route,displayName:selection.profile.name,baseUrl:selection.profile.baseUrl,models:selection.profile.models,module:path.join(runtime.modules,'@deepseek-ai/dsh-llm-deepseek/lib/index.js')}});
  }else entries.push({id:'models',name:adapterPath,config:{providers:{[route]:adapterProfile}}});
  entries.push(attachments);
  entries.push({id:'sessions',name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:sessions,compression:'none'}});

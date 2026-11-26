@@ -38,6 +38,33 @@ export async function frontendSettingsExperienceCases({check,out}){
   assert.equal(await dialog.getByRole('button',{name:'移除令牌'}).count(),0);
   assert.deepEqual(await page.evaluate(()=>window.__test.updateWrites),[{source:'nju',token:'nju-fixture'}]);
  });
+ await check('experience-settings-app-update-and-installer-fallback',async page=>{
+  await page.evaluate(()=>{
+   const original=window.studio.invoke;
+   const current={phase:'idle',currentVersion:'1.2.3',sequence:1};
+   const available={...current,phase:'available',version:'1.2.4',mode:'app',bytes:4194304,fullBytes:4194304,sequence:2};
+   window.__test.updateActions=[];
+   window.studio.invoke=async(method,data)=>{
+    if(method==='updates.status')return current;
+    if(method==='updates.accessStatus')return {github:false,nju:false};
+    if(method==='updates.check')return available;
+    if(method==='updates.run'){
+     window.__test.updateActions.push(method);
+     return {...available,mode:'delta',reason:'app',bytes:8388608,fullBytes:16777216,sequence:3};
+    }
+    return original(method,data);
+   };
+   return window.renderTest('App');
+  });
+  await page.getByRole('button',{name:'软件更新',exact:true}).click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByRole('button',{name:'检查更新',exact:true}).click();
+  await dialog.getByText('应用更新包 · 4.0 MiB',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'下载并重启安装',exact:true}).click();
+  await dialog.getByText('将使用安装包继续更新。',{exact:true}).waitFor();
+  await dialog.getByText('增量下载 · 8.0 MiB',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.__test.updateActions),['updates.run']);
+ });
  await check('experience-settings-cluster-distinguishes-empty-limit-from-zero',async page=>{
   await page.evaluate(()=>{
    const test=window.__test;
