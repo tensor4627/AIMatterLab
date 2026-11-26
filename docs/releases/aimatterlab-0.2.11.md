@@ -32,3 +32,14 @@
 - 计算资源与工作流编写。核对 `studio-compute-workflow` 的资源选择、SSH 只读检查和原回执续接，以及 `studio-workflow-authoring` 的文件发现、导入、复制、读回和参数同步。对照科学功能映射、工具参数、结果字段、会话资源选择器和显式终端入口，并检查普通聊天、已有流程和恢复会话的逐轮提示。旧版私有计算技能继续接受已审阅的公共父指南摘要，保留原始来源文件。未知摘要仍会提示来源待核对。
 - 数据与训练。更新 `studio-data-workflow` 的结果查看器文档，记录产物读取失败、上次列表、重读以及已确认空目录。用当前运行详情源码核对结构预览的文件、帧号和项目范围。复核 `studio-training-workflow` 中 HotPP 引用的 worker 适配器摘要及训练、评估和导出接口。
 - 复核 `studio-main-agent`、`studio-install-readiness`、`studio-tool-discovery`、`studio-tool-onboarding`、`studio-md-workflow`、`studio-neb-workflow`、`studio-cv-bias-planning`、`studio-opes-analysis` 和 `studio-workflow-roadmap` 及其引用。核对产品名称、工作台入口、现有工具和文档 ID，保留原有科学源码基线、配置适用范围和目标验证边界。源码及解包读回均使用本地材料。
+
+## 线上发行验收
+
+| 检查 | 结果 | 证据范围 |
+| --- | --- | --- |
+| 包与版本提交一致性 | passed | 在 NSIS 和便携包中分别读取 89 个指导、运行提示、映射和资源文件，与 `1cbeb10` 的 Git blob 逐字节一致。 |
+| GitHub 主分支与标签源码检查 | passed | 发布提交为 `1cbeb10`。远端标签 `v0.2.11` 解引用后确认同一提交。主分支与标签的 `Check source` 均成功。[主分支](https://github.com/tensor4627/AIMatterLab/actions/runs/45843522223) · [标签](https://github.com/tensor4627/AIMatterLab/actions/runs/45843522286) |
+| 正式发布及附件 | passed | GitHub 的最新正式版为 `v0.2.11`。安装器、块索引、应用更新包和 `latest.yml` 四个附件的服务端大小和 SHA-256 与本地一致。[发行页](https://github.com/tensor4627/AIMatterLab/releases/tag/v0.2.11) |
+| 公开下载与签名 | passed | 匿名取回清单、应用更新包和块索引，摘要一致，清单签名有效。安装器首字节请求返回 `206`、`Content-Range: bytes 0-0/124453888` 和 1 字节正文。旧版块索引可读。 |
+| 0.2.10 → 0.2.11 线上差分 | passed | 读取 0.2.10 成品的实际更新器，在隔离目录使用上版安装包缓存。从 GitHub 发出 7 个 Range 请求，下载 4,070,754 B。下载与重组耗时 4.591 秒，重组后的安装器与签名成品 SHA-256 一致。使用本机现有 GitHub 代理。 |
+| 线上安装交接与覆盖重启 | not_run | 本次线上升级测试做到校验后暂存。0.2.11 成品启动使用独立用户目录。 |
