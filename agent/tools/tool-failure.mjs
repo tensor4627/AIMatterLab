@@ -11,7 +11,7 @@ const managedRecovery=new Map([
  ['ssh_control_timeout',checkSshControl],
  ['ssh_control_unavailable',checkSshControl],
  ['ssh_connection_not_found',checkSshLogin],
- ['ssh_workspace_unconfirmed',['workspace_unconfirmed','Check the original workspace and its command receipt on the same login. Reconcile a write or submission before sending another request.']],
+ ['ssh_workspace_unconfirmed',['workspace_unconfirmed','Check the original command receipt on the same login. Reconcile any unconfirmed write or submission before repeating it. To continue a file inspection, use a separate bounded read such as ls or find on the same resource.']],
  ['ssh_exec_unavailable',['command_channel_unavailable','The SSH endpoint refused the short command. Use a suitable capability already granted on the same resource or report the actual restriction.']],
  ['ssh_command_outcome_unconfirmed',['operation_unconfirmed','The original command may have been dispatched. Check its existing effects and any scheduler receipt before sending a new request.']],
  ['managed_compute_command_not_supported',['capability_required','Check the hosted resource and its confirmed workspace. Select an already available channel appropriate to the operation.']],
@@ -78,7 +78,9 @@ export function toolFailure(error,{dispatched=false,toolName}={}){
  }else if(/required|invalid|missing|expected|must |请选择|参数|缺少/i.test(message)){
   code='invalid_input';next_step='Read the tool schema or engine contract and fill technical fields from the current workflow. Ask the user only for unresolved scientific choices.';
  }
- if(dispatched&&readOnly)next_step='Check the original authorized source and retry this read when available.';
+ if(dispatched&&readOnly)next_step=toolName==='run_compute_command'
+  ?'The read did not return a confirmed receipt. Retry on the same resource with the same request_id for the identical read, or use a new request_id for a smaller read. Directory visibility still depends on the original SSH account.'
+  :'Check the original authorized source and retry this read when available.';
  if(dispatched&&!readOnly&&original.run_id)next_step='Read the status of the exact original run before another write.';
  return {content:[{type:'text',text:JSON.stringify({status:dispatched&&!readOnly?'unknown':code==='tool_error'?'failed':'blocked',code,message,next_step,...original,operation_state:dispatched?(readOnly?'read_started':'unconfirmed'):'not_started',automatic_retry:false})}],isError:true};
 }

@@ -15,6 +15,8 @@ Choose the requested operation. A live queue question delegates a bounded read-o
 
 ## Scope and environment setup
 
+For file inspection through `run_compute_command`, use `ls`, `cat`, or bounded `find` on the requested directory. For example, `find ~/workfile -maxdepth 3 -type f -iname '*hotpp*' | head -n 40` uses the SSH account's read permissions. A missing read receipt permits another bounded read on the same resource. Track an unconfirmed write or submission by its original request. Use a connection receipt to decide whether SSH recovery is needed.
+
 Use `compute_readiness` and `discover_local_environments` when available for registered local environments, bounded discovery and observed CUDA capabilities. Reuse the actual interpreter, executable and pinned source version. Discovery gaps and version warnings limit claims about specific operations. Inspect and repair the selected environment in its own authorized shell. Offer `draft_local_environment` or `draft_cluster_setup` when available and relevant, with observed values for review in settings. Use the connection editor for user-owned credential, project and resource-limit changes. Preserve existing registrations and engine branches.
 
 For cluster workspace setup on the selected job-service path, read [base-workspace.md](base-workspace.md). `setup_base_workspace` may inspect or initialize the active service's base authoring directory when advertised. For explicitly requested directory or environment setup in a hosted shell, use an acquired terminal lease and the user's actual path and scope. Verify the result on that resource. Reuse the original directory for a saved workflow. Installing software, probing a compute node and submitting a job each require scope covering that operation.

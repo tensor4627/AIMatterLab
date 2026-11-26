@@ -219,8 +219,13 @@ test('command leases isolate directories and recover on the original target with
 });
 
 test('short commands distinguish a timed-out connection check from a lost dispatch receipt',async t=>{
- const f=fixture(t,{commandResult:({args})=>{
+ let readAttempts=0;
+ const f=fixture(t,{commandResult:({mode,args})=>{
   if(args[0]==='lost-reply')throw Error('ssh_control_timeout');
+  if(mode==='read'&&args[0]==='ls'){
+   if(++readAttempts===1)throw Error('ssh_workspace_unconfirmed');
+   return {status:'result',code:0,output:'fixture directory'};
+  }
   return {status:'result',code:0,output:''};
  }});
  const chat=f.owner('codex','command-receipts');
@@ -256,6 +261,22 @@ test('short commands distinguish a timed-out connection check from a lost dispat
  await assert.rejects(run('second','mkdir lost-reply'),error=>receipt(error).operation_state==='unconfirmed');
  await assert.rejects(run('first','mkdir another'),/invalid_request/);
  assert.equal(count(),2);
+ f.lose(login,'authenticated');
+ const readId='outside-read',read='ls -ld "$HOME/workfile"';
+ await assert.rejects(run(readId,read),error=>{
+  const reply=receipt(error);
+  assert.equal(reply.code,'workspace_unconfirmed');
+  assert.equal(reply.operation_state,'read_started');
+  assert.equal(reply.status,'blocked');
+  assert.match(reply.next_step,/Retry on the same resource with the same request_id/);
+  return true;
+ });
+ await assert.rejects(run(readId,'mkdir changed-input'),/invalid_request/);
+ const confirmation=await run(readId,read);
+ assert.equal(confirmation.output,'fixture directory');
+ assert.deepEqual(await run(readId,read),confirmation);
+ assert.equal(readAttempts,2);
+ assert.equal(count(),4);
 });
 
 test('a temporary developer terminal is not restored as an ordinary session grant after relogin',async t=>{

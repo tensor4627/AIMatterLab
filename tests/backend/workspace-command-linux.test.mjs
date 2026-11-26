@@ -4,6 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {workspaceProbeCommand} from '../../desktop/platform/terminal-service/workspace-probe.mjs';
 import {workspaceCommand} from '../../desktop/platform/terminal-service/workspace-command.mjs';
+import {createWorkspaceTerminalAuthorization} from '../../backend/main/compute/workspace-terminal-authorization.mjs';
 
 const wsl = process.env.STUDIO_WORKSPACE_TEST_WSL;
 const linux = process.platform === 'linux' || wsl;
@@ -12,7 +13,7 @@ function shell(command, ...args) {
  return execFileSync(wsl?'wsl.exe':'/bin/sh',[...prefix,'-c',command,'aimatterlab-fixture',...args],{encoding:'utf8',timeout:20000,windowsHide:true});
 }
 
-test('real Linux workspace probe, shell boundary, and the actual script delivered to a scheduler', {skip:!linux}, t=>{
+test('real Linux workspace probe, shell boundary, and the actual script delivered to a scheduler', {skip:!linux}, async t=>{
  const fixture=shell('mktemp -d /tmp/aimatterlab-workspace-test.XXXXXXXX').trim();
  assert.match(fixture,/^\/tmp\/aimatterlab-workspace-test\.[A-Za-z0-9]+$/);
  t.after(()=>shell('case "$1" in /tmp/aimatterlab-workspace-test.*) rm -r -- "$1" ;; esac',fixture));
@@ -30,6 +31,19 @@ test('real Linux workspace probe, shell boundary, and the actual script delivere
  };
  shell('printf original > "$1"; ln -s "$1" "$2"',outside,root+'/external-link');
  shell('ln -s "$1" "$2"',root,fixture+'/project-link');
+ const scope={provider:'codex',threadId:'workfile-fixture'};
+ const authorization=createWorkspaceTerminalAuthorization({
+  workspace:{forTerminal:()=>({root,path:root,workspaceId:'fixture',identity:observed.identity})},current:()=>scope,
+  connections:{runWorkspaceCommand:({mode,args,cwd})=>run(mode,args,undefined,cwd)},emit:()=>assert.fail('A read opened a command review')
+ });
+ const command=`printf 'HOME=%s\\n' "$HOME"; if [ -d "${fixture}" ]; then find "${fixture}" -type f -name outside.txt 2>/dev/null | head -n 3; else echo missing; fi`;
+ const execute=(command,requestId)=>authorization.execute({scope,ref:{connectionId:'fixture',resourceId:'ssh:fixture'},leaseId:'fixture',requestId,command,assertCurrent(){}});
+ const scan=await execute(command,'scan');
+ assert.equal(scan.execution_status,'completed');
+ assert.deepEqual(scan.output.trimEnd().split('\n'),['HOME='+shell('printf "%s" "$HOME"'),outside]);
+ assert.match((await execute(command.replaceAll(fixture,fixture+'/missing'),'missing')).output,/\nmissing\n?$/);
+ const contentRead=await execute('cat "'+outside+'"','external');
+ assert.equal(contentRead.output,'original');
  assert.equal(run('cwd',[fixture]).output.trim(),fixture);
  assert.equal(run('cwd',['/']).output.trim(),'/');
  const inspected=run('read_pipeline',[JSON.stringify([['find','.', '-maxdepth','1','-name','outside.txt'],['head','-n','1']])],undefined,fixture);
@@ -52,6 +66,8 @@ test('real Linux workspace probe, shell boundary, and the actual script delivere
  }
  assert.ok(['landlock','bubblewrap'].includes(canRun.confinement));
  assert.equal(canRun.code,0);
+ const lookup=await execute('tool=$(command -v sh 2>/dev/null); printf "%s" "$tool"','command-substitution');
+ assert.equal(lookup.output,shell('command -v sh').trim());
  const discarded=run('confined',['printf visible; printf discarded 2>/dev/null >/dev/null']);
  assert.equal(discarded.code,0);assert.equal(discarded.output.trim(),'visible');
  assert.equal(shell('cat -- "$1"',root+'/inside.txt'),'installed');

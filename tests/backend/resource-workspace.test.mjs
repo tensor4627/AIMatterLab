@@ -204,6 +204,7 @@ test('read-only preinstalled binaries and workspace effects classify by destinat
  assert.equal(classifyWorkspaceCommand('cp input.xyz /work/input.xyz','/work','/project').mode,'copy_target');
  assert.equal(classifyWorkspaceCommand('cd /shared','/work','/work').mode,'cwd');
  assert.equal(classifyWorkspaceCommand('find /shared -type f -name "*.xyz" | head -n 20','/work','/shared').mode,'read_pipeline');
+ assert.deepEqual(classifyWorkspaceCommand('ls -ld "$HOME/workfile"','/work','/shared').args,['ls','-ld','~/workfile']);
  assert.equal(classifyWorkspaceCommand('find /shared -delete','/work','/work').reason,'destructive');
  assert.notEqual(classifyWorkspaceCommand('find /shared -fprint results.txt','/work','/work').mode,'read');
  assert.notEqual(classifyWorkspaceCommand('find /shared -exec mkdir {} \\; | head','/work','/work').mode,'read_pipeline');
@@ -212,6 +213,24 @@ test('read-only preinstalled binaries and workspace effects classify by destinat
  assert.equal(classifyWorkspaceCommand('/opt/tool/bin/program data.xyz','/work','/work').reason,'unverified_effects');
  assert.equal(classifyWorkspaceCommand('rm results.txt','/work','/work').reason,'destructive');
  assert.deepEqual(classifyWorkspaceCommand("cat > sbatch.sh <<'EOF'\n#!/bin/sh\necho ready\nEOF",'/work','/work').args,['sbatch.sh','#!/bin/sh\necho ready\n']);
+});
+
+test('the reported directory scan compiles only read-only commands and null redirections',()=>{
+ const scan=String.raw`printf 'HOME=%s\n' "$HOME"; if [ -d "$HOME/workfile" ]; then find "$HOME/workfile" -maxdepth 4 -type f \( -iname '*hotpp*' -o -iname '*.yaml' \) -printf '%p\t%s bytes\n' 2>/dev/null | head -n 200; else echo 'NO_WORKFILE_DIR'; fi`;
+ const classify=command=>classifyWorkspaceCommand(command,'/work','/shared');
+ const result=classify(scan);
+ assert.equal(result.mode,'read_batch');
+ assert.match(result.args[0],/command 'test' '-d' "\$HOME"'\/workfile'; then command 'find'/);
+ assert.match(result.args[0],/2>\/dev\/null \| command 'head' '-n' '200'/);
+ assert.equal(classify(scan.replace("echo 'NO_WORKFILE_DIR'",'mkdir /shared/new')).mode,'approved');
+ assert.equal(classify(scan.replace('-printf','-fprintf')).mode,'approved');
+ assert.equal(classify(scan.replace('2>/dev/null','2>/shared/errors')).mode,'approved');
+ assert.equal(classify(scan.replace('"$HOME/workfile"','"$HOME/$(whoami)"')).mode,'approved');
+ const substitution=String.raw`tool=$(command -v python3 2>/dev/null); printf '%s\n' "$tool"`;
+ const inWorkspace=command=>classifyWorkspaceCommand(command,'/work','/work').reason;
+ assert.equal(inWorkspace(substitution),'unverified_effects');
+ assert.equal(inWorkspace(substitution.replace('/dev/null','"/dev/null)"')),'outside_workspace');
+ assert.equal(inWorkspace(substitution.replace('/dev/null',String.raw`/dev/null\)`)),'outside_workspace');
 });
 
 test('outside navigation and bounded inspection preserve ordinary access while copies require a canonical destination receipt',async()=>{

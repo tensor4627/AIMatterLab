@@ -9,6 +9,7 @@ const readOnly = new Set(['pwd', 'ls', 'cat', 'head', 'tail', 'grep', 'wc', 'sta
 const argument = value => typeof value === 'string' && value.length <= 8192 && !/[\x00\x1b]/.test(value);
 const canonicalDirectory = value => value==='/' || absoluteWorkspace(value);
 const homeArgument = value => value==='~'||value.startsWith('~/')?'"$HOME"'+quote(value.slice(1)):quote(value);
+export const renderWorkspaceObservation = argv => 'command '+argv.map(homeArgument).join(' ');
 
 function readOnlyFind(args){
   const operators=new Set(['-print','-print0','-ls','-empty','-readable','-writable','-executable','-mount','-xdev','-depth','-mindepth','-daystart','-ignore_readdir_race','-noleaf','-quit','-true','-false','-and','-or','-not','-a','-o','!','(',')',',','-prune','-P','-H','-L','--']);
@@ -249,7 +250,7 @@ export function workspaceCommand({root, cwd, identity, mode, args}) {
     let pipeline;
     try{pipeline=mode==='read'?[args]:JSON.parse(args[0]);}catch{}
     if(!Array.isArray(pipeline)||!pipeline.length||pipeline.length>8||!pipeline.every(allowedObservation))throw new TerminalFault('ssh_workspace_invalid',409);
-    args=[pipeline.map(argv=>'command '+argv.map(homeArgument).join(' ')).join(' | ')];
+    args=[pipeline.map(renderWorkspaceObservation).join(' | ')];
   }
   const confined = mode === 'confined' || mode === 'confined_overwrite';
   const confinement = confined || mode === 'job' ? confinementSource() : '';

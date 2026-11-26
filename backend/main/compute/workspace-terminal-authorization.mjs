@@ -1,7 +1,7 @@
 /** Scope and review agent SSH commands before any input reaches a remote shell. */
 import {createHash,randomUUID} from 'node:crypto';
 import {posix} from 'node:path';
-import {allowedObservation} from '../../../desktop/platform/terminal-service/workspace-command.mjs';
+import {allowedObservation,renderWorkspaceObservation} from '../../../desktop/platform/terminal-service/workspace-command.mjs';
 import {absoluteWorkspace} from '../../../desktop/platform/terminal-service/workspace-probe.mjs';
 
 const fail = code => { throw Object.assign(Error(code), {operationNotStarted: true}); };
@@ -10,10 +10,11 @@ const inside = (root, directory) => directory === root || directory.startsWith(r
 const absolute = (cwd, value) => posix.resolve(cwd, value);
 const canonicalDirectory = value => value==='/'||absoluteWorkspace(value);
 const commandDigest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const observations = new Set(['read','read_pipeline','cwd','job_preview','copy_target']);
+const readModes = new Set(['read','read_pipeline','read_batch','cwd']);
+const observations = new Set([...readModes,'job_preview','copy_target']);
 
 function words(text) {
-  const tokens = /\s+|'[^']*'|"[^"$`\\]*"|\\[()]|[A-Za-z0-9_.\/\-,:+@%*=~?!]+/gy;
+  const tokens = /\s+|'[^']*'|"\$(?:HOME|\{HOME\})(?:\/[^"$`\\]*)?"|"[^"$`\\]*"|\$(?:HOME|\{HOME\})(?:\/[A-Za-z0-9_.\/\-,:+@%*=~?!]*)?|\\[()]|[A-Za-z0-9_.\/\-,:+@%*=~?!]+/gy;
   const output = [];
   let end = 0, previous = ' ';
   for (const match of text.matchAll(tokens)) {
@@ -25,24 +26,66 @@ function words(text) {
     }
     if (previous !== ' ') return null;
     previous = match[0];
-    output.push(/^['"]/.test(previous) ? previous.slice(1, -1) : previous.replace(/^\\([()])$/, '$1'));
+    if(previous[0]==="'")output.push(previous.slice(1,-1));
+    else{
+      const value=previous[0]==='"'?previous.slice(1,-1):previous.replace(/^\\([()])$/, '$1');
+      output.push(value.replace(/^\$(?:HOME|\{HOME\})(?=\/|$)/,'~'));
+    }
   }
   return end === text.length && output.length ? output : null;
 }
 
-function readPipeline(command){
-  if(/[\r\n]/.test(command))return null;
+function splitUnquoted(command,separators){
   const pieces=[];let quote='',offset=0;
   for(let at=0;at<command.length;at++){
     const character=command[at];
     if(quote){if(character===quote)quote='';continue;}
     if(character==='"'||character==="'")quote=character;
-    else if(character==='|'){pieces.push(command.slice(offset,at));offset=at+1;}
+    else if(separators.includes(character)){pieces.push(command.slice(offset,at).trim());offset=at+1;}
   }
-  if(!pieces.length||quote||pieces.length>=8)return null;
-  pieces.push(command.slice(offset));
-  const parsed=pieces.map(part=>words(part.trim()));
-  return parsed.every(allowedObservation)?parsed:null;
+  if(quote)return null;
+  pieces.push(command.slice(offset).trim());
+  return pieces;
+}
+
+function readPipeline(command){
+  if(/[\r\n]/.test(command))return null;
+  const pieces=splitUnquoted(command,'|');
+  if(!pieces||pieces.length>8)return null;
+  const parsed=pieces.map(part=>{
+    const quiet=/[ \t]+2>[ \t]*\/dev\/null$/.exec(part);
+    return {args:words(quiet?part.slice(0,quiet.index):part),quiet:!!quiet};
+  });
+  return parsed.every(({args})=>allowedObservation(args))?parsed:null;
+}
+
+function renderReadPipeline(command){
+  if(!command)return null;
+  return readPipeline(command)?.map(({args,quiet})=>renderWorkspaceObservation(args)+(quiet?' 2>/dev/null':'')).join(' | ');
+}
+
+function readBatch(command){
+  const parts=splitUnquoted(command,';\n');
+  if(!parts||parts.length>16)return null;
+  const pieces=[];
+  for(let at=0;at<parts.length;at++){
+    const part=parts[at];
+    const condition=/^if[ \t]+\[[ \t]+(-[defrs])[ \t]+(.+)[ \t]+\]$/.exec(part);
+    if(!condition){
+      const read=renderReadPipeline(part);
+      if(!read)return null;
+      pieces.push(read);
+      continue;
+    }
+    const target=words(condition[2].trim());
+    const yes=renderReadPipeline(/^then[ \t]+(.+)$/.exec(parts[at+1])?.[1]);
+    const no=renderReadPipeline(/^else[ \t]+(.+)$/.exec(parts[at+2])?.[1]);
+    if(target?.length!==1||!yes||!no||parts[at+3]!=='fi')return null;
+    pieces.push('if '+renderWorkspaceObservation(['test',condition[1],target[0]])+'; then '+yes+'; else '+no+'; fi');
+    at+=3;
+  }
+  const shell=pieces.join('; ');
+  return Buffer.byteLength(shell)<=8192?shell:null;
 }
 
 // Path-bearing directives (for example --output or -o) need the ordinary
@@ -59,8 +102,11 @@ function workspaceJobDirectives(script,scheduler){
 export function classifyWorkspaceCommand(text, root, cwd) {
   const command = text.trim(), here = /^cat\s*>\s*(.+?)\s*<<\s*'([A-Za-z_][A-Za-z0-9_]*)'\n([\s\S]*)\n\2$/.exec(command);
   const args = /[\r\n]/.test(command) ? null : words(command);
+  if(allowedObservation(args))return {mode:'read',args,paths:[]};
   const pipeline=readPipeline(command);
-  if(pipeline)return {mode:'read_pipeline',args:[JSON.stringify(pipeline)],paths:[]};
+  if(pipeline?.length>1&&pipeline.every(step=>!step.quiet))return {mode:'read_pipeline',args:[JSON.stringify(pipeline.map(step=>step.args))],paths:[]};
+  const batch=readBatch(command);
+  if(batch)return {mode:'read_batch',args:[batch],paths:[]};
   const lsf = /^bsub[\t ]*<[\t ]*(.+)$/.exec(command);
   const job = lsf ? {scheduler:'bsub', path:words(lsf[1])} : args?.[0] === 'sbatch' ?
     {scheduler:'sbatch', path:args.slice(args[1] === '--parsable' ? 2 : 1)} : null;
@@ -76,7 +122,6 @@ export function classifyWorkspaceCommand(text, root, cwd) {
     }
   } else if (args) {
     const [name, ...rest] = args;
-    if (allowedObservation(args)) return {mode:'read', args, paths: []};
     if (name === 'cd' && (rest.length===0||rest.length===1&&(!rest[0].startsWith('-')||rest[0]==='-')))
       return {mode:'cwd',args:rest.length?rest:['~'],paths:[]};
     if (name === 'mkdir' && (rest[0] === '-p' ? rest.slice(1) : rest).length && (rest[0] === '-p' ? rest.slice(1) : rest).every(value => !value.startsWith('-'))) {
@@ -98,12 +143,11 @@ export function classifyWorkspaceCommand(text, root, cwd) {
     .map(value => value.trim().replace(/^[=><]/, '').replace(/^['"]|['"]$/g, '')).filter(value => value.startsWith('/'));
   const destructive = /(?:^|[;|&\s])(?:\/[\w/-]+\/)?(?:rm|rmdir|unlink|mv|truncate|dd|scancel|bkill|chmod|chown)(?=\s|$)/.test(command)||
     /(?:^|[;&|\s])(?:\/[^\s]+\/)?find\s[^\n]*\s-(?:delete|fprint0?|fprintf|fls)(?=\s|$)/.test(command);
-  const changesDirectory = /(?:^|[;&|\n])\s*cd\s+['"]?(\/[^'"\s;|&]+)|(?:^|[\s\d])>>?\s*['"]?(\/[^'"\s;|&]+)/g;
-  const outside = [...command.matchAll(changesDirectory)].some(([, directory, redirect]) => {
-    // The confinement backend provides the null device. The entire batch still runs inside that boundary.
-    if (redirect === '/dev/null') return false;
-    return !inside(root, posix.normalize(directory || redirect));
-  });
+  const directories = /(?:^|[;&|\n])\s*cd\s+(?:"(\/[^"]+)"|'(\/[^']+)'|(\/(?:\\.|[^'"\\\s;|&()<>])+))/g;
+  const redirects = /(?:^|[\s\d])>>?\s*(?:"(\/[^"]+)"|'(\/[^']+)'|(\/(?:\\.|[^'"\\\s;|&()<>])+))/g;
+  const outsidePath = ([, double, single, plain]) => !inside(root,posix.normalize(double||single||plain));
+  const outside = [...command.matchAll(directories)].some(outsidePath)||
+    [...command.matchAll(redirects)].some(match=>!match.slice(1).includes('/dev/null')&&outsidePath(match));
   return {mode:'approved', args:[command], paths:[...new Set(literal)],
     reason: destructive ? 'destructive' : !inside(root, cwd) || outside ? 'outside_workspace' : 'unverified_effects'};
 }
@@ -173,18 +217,21 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     const config = {scope, ref, guard, root, cwd};
     const execute = async (mode, args, dispatchGuard=guard) => {
       dispatchGuard();
-      const mutates=!observations.has(mode);
+      const readOnly=readModes.has(mode),mutates=!observations.has(mode);
       if (mutates) beforeMutation?.();
       let received=false;
       try {
-        const response = await connections.runWorkspaceCommand({connectionId:ref.connectionId, profileId:ref.profileId, profileVersion:ref.profileVersion, root, cwd, identity, mode, args}, dispatchGuard);
+        // The desktop compiles every operation in a read batch. Existing SSH brokers accept the resulting shell through their existing transport.
+        const transportMode=mode==='read_batch'?'approved':mode;
+        const response = await connections.runWorkspaceCommand({connectionId:ref.connectionId, profileId:ref.profileId, profileVersion:ref.profileVersion, root, cwd, identity, mode:transportMode, args}, dispatchGuard);
         received=true;
         dispatchGuard();
         if (!response || !['result','outside','destructive','changed','unavailable','submission_unconfirmed'].includes(response.status) || !Number.isInteger(response.code) || typeof response.output !== 'string') throw Error('ssh_workspace_unconfirmed');
         if (response.status === 'changed') throw Object.assign(Error('ssh_workspace_changed'),{operationDispatched:false});
         return response;
       } catch(error) {
-        error.operationDispatched=mutates&&(error.operationDispatched??(received||!error.operationNotStarted));
+        error.operationDispatched=(mutates||readOnly)&&(error.operationDispatched??(received||!error.operationNotStarted));
+        if(readOnly)error.readOnlyOperation=true;
         throw error;
       }
     };
@@ -277,7 +324,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     }
     if (response.status === 'result' && response.code === 0 && mode==='cwd') {
       const actualPath=response.output.replace(/\r?\n$/,'');
-      if (!canonicalDirectory(actualPath)) throw Error('ssh_workspace_unconfirmed');
+      if (!canonicalDirectory(actualPath)) throw Object.assign(Error('ssh_workspace_unconfirmed'),{readOnlyOperation:true,operationDispatched:true});
       entry.previousCwd=entry.cwd;
       entry.cwd=actualPath;
     }
@@ -312,15 +359,16 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     const signature = JSON.stringify(input), prior = entry.requests.get(input.requestId);
     if (prior) {
       if (prior.signature !== signature) fail('terminal_invalid_request');
-      return prior.operation;
+      if (!prior.retryRead) return prior.operation;
     }
     if (entry.running) fail('ssh_terminal_command_pending');
     if(entry.modeRevision!==modeRevision){entry.staged='';entry.modeRevision=modeRevision;}
-    if (entry.requests.size >= 4096) fail('ssh_terminal_request_limit');
+    if (!prior && entry.requests.size >= 4096) fail('ssh_terminal_request_limit');
     entry.assertCurrent=assertCurrent;
     if (entry.workspaceId !== registered.workspaceId || entry.path !== registered.path) {
       Object.assign(entry,{workspaceId:registered.workspaceId,path:registered.path,cwd:registered.path,previousCwd:undefined,staged:''});
     }
+    const request = {signature,retryRead:false};
     const operation = Promise.resolve().then(async () => {
       guard();
       if (input.command !== undefined) {
@@ -356,6 +404,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
         try {
           result = await run({scope,ref,guard,entry,registered,command:input.command,beforeMutation});
         } catch(error) {
+          if(!claimed&&error.readOnlyOperation===true)request.retryRead=true;
           if (claimed&&(error.operationDispatched===false||error.operationDispatched!==true&&error.operationNotStarted===true)) {
             try {
               if(catalog.remove){catalog.remove('ssh-command-receipt',receiptId);entry.requests.delete(input.requestId);}
@@ -387,7 +436,8 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
       return run({scope,ref,guard,entry,registered,command});
     }).finally(() => {entry.running = false;});
     entry.running = true;
-    entry.requests.set(input.requestId, {signature, operation});
+    request.operation=operation;
+    entry.requests.set(input.requestId, request);
     return operation;
   }
   return {
