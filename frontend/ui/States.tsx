@@ -33,16 +33,17 @@ export function LoadingState({
 }
 
 export function ErrorState({
-  title, retained, action, details, className, ...props
-}: StateProps & {retained?: ReactNode; details?: ReactNode}) {
+  title, retained, action, details, detailsSummary, detailsTestId, headingLevel = 3, className, ...props
+}: StateProps & {retained?: ReactNode; details?: ReactNode; detailsSummary?: ReactNode; detailsTestId?: string; headingLevel?: 2 | 3}) {
+  const Heading = headingLevel === 2 ? 'h2' : 'h3';
   return (
     <div {...props} className={['aml-error-state', className].filter(Boolean).join(' ')}>
       <div role="alert">
-        <h3><CircleAlert size={18} aria-hidden="true" /> {t(title)}</h3>
+        <Heading><CircleAlert size={18} aria-hidden="true" /> {t(title)}</Heading>
         {retained && <p>{typeof retained === 'string' ? t(retained) : retained}</p>}
       </div>
       {action}
-      {details && <Disclosure summary={t('技术详情')}>{details}</Disclosure>}
+      {details && <Disclosure data-testid={detailsTestId} summary={detailsSummary ?? t('技术详情')}>{details}</Disclosure>}
     </div>
   );
 }

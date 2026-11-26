@@ -17,8 +17,8 @@
   }
   .aml-empty-state > svg { color: var(--accent); }
   .aml-error-state { border-color: var(--danger); background: var(--danger-bg); }
-  .aml-error-state h3 svg { color: var(--danger); vertical-align: middle; }
-  :is(.aml-empty-state, .aml-error-state) h3 { margin: 0; font-size: var(--font-title); }
+  .aml-error-state :is(h2,h3) svg { color: var(--danger); vertical-align: middle; }
+  :is(.aml-empty-state, .aml-error-state) :is(h2,h3) { margin: 0; font-size: var(--font-title); }
   :is(.aml-empty-state, .aml-error-state) p { margin: 0; color: var(--muted); }
   .aml-loading-state { display: inline-flex; min-width: 0; }
 }

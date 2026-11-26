@@ -13,6 +13,20 @@
   pointer-events: none;
  }
 
+ .modal-toast-host:empty { display: none; }
+ .modal-toast-host:not(:empty) {
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-6);
+ }
+ .app-toast-region[data-dialog-toast] {
+  position: static;
+  max-width: 100%;
+  max-height: 35dvh;
+  overflow: auto;
+  margin-inline-start: auto;
+  pointer-events: auto;
+ }
+
  @supports (inset-block-end: anchor(top)) {
   .app-toast-region {
    position-anchor: --aml-action-bar;
@@ -46,7 +60,6 @@
  .app-toast-message .diagnostic-notice { margin: 0; }
  .app-toast-dismiss { flex: none; min-width: 28px; min-height: 28px; }
  .app-toast:has(.diagnostic-notice) .app-toast-icon { display: none; }
- body:has([role='dialog']) .app-toast { pointer-events: none; }
 
  @media (prefers-reduced-motion: no-preference) {
   .app-toast { animation: app-toast-in var(--motion-gentle-dur) var(--ui-ease); }

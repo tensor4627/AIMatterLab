@@ -1,5 +1,6 @@
 import {ChevronDown} from 'lucide-react';
 import {useCallback, useLayoutEffect, useRef, type ComponentPropsWithRef, type ComponentPropsWithoutRef, type ReactNode} from 'react';
+import Tooltip from './Tooltip';
 import './components/disclosure.css';
 
 type DisclosureProps = ComponentPropsWithRef<'details'> & {
@@ -7,10 +8,11 @@ type DisclosureProps = ComponentPropsWithRef<'details'> & {
   variant?: 'section' | 'detail';
   forceOpen?: boolean;
   summaryProps?: ComponentPropsWithoutRef<'summary'> & {[name: `data-${string}`]: string | number | boolean | undefined};
+  summaryTooltip?: string;
 };
 
 export function Disclosure({
-  summary, variant = 'detail', forceOpen = false, summaryProps, className, children, ref, ...props
+  summary, variant = 'detail', forceOpen = false, summaryProps, summaryTooltip, className, children, ref, ...props
 }: DisclosureProps) {
   const node = useRef<HTMLDetailsElement>(null);
   const attachRef = useCallback((details: HTMLDetailsElement | null) => {
@@ -22,12 +24,16 @@ export function Disclosure({
     if (forceOpen && node.current) node.current.open = true;
   }, [forceOpen]);
 
+  const trigger = (
+    <summary {...summaryProps}>
+      <ChevronDown className="aml-disclosure-arrow" size={16} aria-hidden="true" />
+      {summary}
+    </summary>
+  );
+
   return (
     <details {...props} ref={attachRef} className={['aml-disclosure', className].filter(Boolean).join(' ')} data-variant={variant}>
-      <summary {...summaryProps}>
-        <ChevronDown className="aml-disclosure-arrow" size={16} aria-hidden="true" />
-        {summary}
-      </summary>
+      {summaryTooltip ? <Tooltip asChild content={summaryTooltip}>{trigger}</Tooltip> : trigger}
       {children}
     </details>
   );
