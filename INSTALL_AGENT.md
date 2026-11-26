@@ -4,7 +4,7 @@
 
 ## 获取可信源码
 
-在准备存放源码的父目录运行以下命令。正式版发布后，从 GitHub 主仓库 `https://github.com/tensor4627/AIMatterLab.git` 按 `refs/tags/v0.2.10` 固定版本。验证本地候选版时，请将 `$releaseSource` 指向持有候选源码的仓库，并在 `$approvedSourceCommit` 填写经核对的完整提交 ID。
+在准备存放源码的父目录运行以下命令。从 GitHub 主仓库 `https://github.com/tensor4627/AIMatterLab.git` 按 `refs/tags/v0.2.10` 固定版本。验证本地候选版时，请将 `$releaseSource` 指向持有候选源码的仓库，并在 `$approvedSourceCommit` 填写经核对的完整提交 ID。
 
 ```powershell
 $releaseSource = 'https://github.com/tensor4627/AIMatterLab.git'

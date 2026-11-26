@@ -23,5 +23,5 @@
     "neb": "fixture_required"
   },
   "distribution_status": "signed_windows_x64",
-  "distribution_scope": "AIMatterLab 0.2.10 Windows x64 release candidate. See docs/releases/aimatterlab-0.2.10.md for validation and release status."
+  "distribution_scope": "AIMatterLab 0.2.10 source and signed Windows x64 release. See docs/releases/aimatterlab-0.2.10.md for validation scope."
 }

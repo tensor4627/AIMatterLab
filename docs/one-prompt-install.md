@@ -3,7 +3,7 @@
 复制下面的提示词给可以使用本机终端和 Git 的 Agent。正式版发布后，通过 GitHub 主仓库 `https://github.com/tensor4627/AIMatterLab.git` 的对应标签获取源码。验证本地候选版时使用经核对的本地仓库和提交。
 
 ```text
-请在我的 Windows 电脑安装 AIMatterLab 0.2.10。正式版发布后从 GitHub 核对 refs/tags/v0.2.10。验证候选版时使用我指定的仓库及完整提交 ID。在新目录使用所选版本，读取 INSTALL_AGENT.md 并核对安装清单。按我选定的连接路线发现所需程序和可复用的计算环境，再按选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
+请在我的 Windows 电脑安装 AIMatterLab 0.2.10。从 GitHub 核对 refs/tags/v0.2.10。验证候选版时使用我指定的仓库及完整提交 ID。在新目录使用所选版本，读取 INSTALL_AGENT.md 并核对安装清单。按我选定的连接路线发现所需程序和可复用的计算环境，再按选定的服务商和短例验证。完成后给我启动文件和实际验收结果。
 ```
 
 完整指令见 [INSTALL_AGENT.md](../INSTALL_AGENT.md)。[安装清单](../installation/manifest.json)列出官方仓库、本版版本号和发布引用。需要登录仓库时由用户在本机 Git 凭据界面完成。
