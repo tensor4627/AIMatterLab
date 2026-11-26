@@ -842,7 +842,7 @@
       ],
       "status": "implemented_lease_and_bounded_scheduler_probe",
       "phase": "discovery",
-      "adaptation": "For live queue and idle-GPU questions, match the resource named in chat to its listed ID. For a hosted SSH resource with command access, acquire a command lease and run a bounded scheduler probe. For a registered worker, use a service lease and its advertised inspection tool. Call acquire_compute_resource for an ambiguous target and reuse the user's choice in the same chat. DeepSeek presents the eligible candidates in the chat input area. Other providers can ask about unanswered candidates in chat. The selection receipt preserves the current authorization. Manual sharing applies after a separate human handoff.",
+      "adaptation": "For live queue and idle-GPU questions, match the resource named in chat to its listed ID. For a hosted SSH resource with command access, acquire a command lease and run a bounded scheduler probe. For a registered worker, use a service lease and its advertised inspection tool. Call acquire_compute_resource for an ambiguous target. AIMatterLab presents the eligible candidates in the chat input area. Continue the same task using target_selected.retry after the user chooses. The selection receipt preserves the current authorization. Manual sharing applies after a separate human handoff.",
       "reference_files": {
         "studio-compute-workflow": [
           "references/compute-discovery.md",

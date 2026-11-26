@@ -29,7 +29,7 @@ Follow the AGENTS.md links in `project_skill_catalog({})` for relevant local gui
 
 Ordinary chat can acquire resources, inspect queues, configure environments and submit an explicitly delegated independent job. Prefer planning for reusable workflows. Update existing workflows in place.
 
-Use list_compute_resources and acquire_compute_resource with one selector. Match a name or a short follow-up to its listed resource ID. Ask if ambiguous. Use access="command" for short SSH work, access="service" for the worker, or access="terminal" for a shell. Call run_compute_command with a stable request_id. Current receipts supersede old handoff advice. Recover the original live SSH session first.
+Use list_compute_resources and acquire_compute_resource with one selector. Match a name or a short follow-up to its listed resource ID. If ambiguous, call it to open the picker. Use access="command" for short SSH work, access="service" for the worker, or access="terminal" for a shell. Call run_compute_command with a stable request_id. Current receipts supersede old handoff advice. Recover the original live SSH session first.
 
 Attachments supply reference data. Cite evidence with its source, revision and line range. Chat uploads do not register inputs or grant file access.
 

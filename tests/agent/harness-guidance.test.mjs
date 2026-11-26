@@ -62,6 +62,7 @@ test('ACP profiles deliver the same bounded AIMatterLab core and progressive ski
   assert.match(document,/access="command" for short SSH work, access="service" for the worker, or access="terminal" for a shell/);
   assert.match(document,/run_compute_command with a stable request_id/);
   assert.match(document,/a short follow-up.*listed resource ID/);
+  assert.match(document,/If ambiguous, call it to open the picker/);
   assert.match(document,/Current receipts supersede old handoff advice/);
   assert.match(document,/Recover the original live SSH session first/);
   assert.match(document,/user-local third-party tool with `tool\.onboarding` in `scope="user"`/);
@@ -194,10 +195,10 @@ test('compute.queue reads the current leased-resource guidance in ordinary chat'
  assert.match(result.text,/bounded read-only scheduler probe in ordinary chat/);
  assert.match(result.text,/commandAvailable.*run_compute_command.*stable.*request_id/);
  assert.match(result.text,/same-resource service retry/);
- assert.match(result.text,/DeepSeek presents eligible .choice_required. candidates in the chat input area/);
- assert.match(result.text,/unanswered .choice_required. candidates, ask which one in this chat/);
+ assert.match(result.text,/AIMatterLab presents eligible candidates in the chat input area/);
+ assert.match(result.text,/target_selected.*retry.*continue the current task/);
  assert.match(result.text,/requires no desktop panel binding/);
- assert.match(result.text,/Include.*resource_id.*profile_id.*for duplicate display names/);
+ assert.match(result.text,/picker distinguishes resources with matching names by ID/);
  assert.match(result.text,/Only an acquired terminal with its session receipt establishes a shell/);
  assert.match(result.text,/two-factor prompts in the connection's private terminal/);
  const recoveryResult=await service.call('read_scientific_skill',{...args,document_id:recovery},scope);

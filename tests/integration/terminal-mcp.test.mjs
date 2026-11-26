@@ -132,9 +132,8 @@ test('missing resource selection is resolved in the same chat using the listed I
  assert.equal(reply.code,'resource_selection_required');
  assert.equal(reply.operation_state,'not_started');
  assert.match(reply.next_step,/in this chat/i);
- assert.match(reply.next_step,/submitted resource option.*directly named target/i);
- assert.match(reply.next_step,/current resource_id.*requested access/i);
- assert.match(reply.next_step,/ambiguous.*picker/i);
+ assert.match(reply.next_step,/selected in the picker or directly named/i);
+ assert.match(reply.next_step,/picker is already open, wait for its answer/i);
  assert.match(reply.next_step,/project or login refusal only when its own receipt/i);
 });
 

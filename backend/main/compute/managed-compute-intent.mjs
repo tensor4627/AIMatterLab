@@ -257,15 +257,18 @@ export function createManagedComputeIntent(catalog){
   return label=>bindings.has(label)&&current(scope)===turn&&scope.checkCurrent?.()!==false
    ?acceptQuestionChoice(scope,turn,proposal,bindings.get(label),isCurrent):null;
  }
- function confirmQuestionChoice(scope,{offered,resourceId,custom},isCurrent){
+ function bindComputeChoice(scope,offered,isCurrent){
   const turn=current(scope);
   if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null))fail('managed_compute_turn_changed');
   const proposal=turn.pending||{alias:null,save:false,candidates:[...turn.named,...turn.ambiguous]};
-  const message=typeof custom==='string'?text(custom):'';
-  const matches=proposal.candidates.filter(choice=>offered.includes(choice.resourceId)&&
-   (resourceId?choice.resourceId===resourceId:message&&[choice.name,choice.resourceId,choice.profileId].some(name=>exactAnswer(message,{name}))));
-  if(matches.length!==1)return null;
-  return acceptQuestionChoice(scope,turn,proposal,matches[0],isCurrent);
+  const candidates=proposal.candidates.filter(choice=>offered.includes(choice.resourceId));
+  return ({resourceId,custom})=>{
+   if(current(scope)!==turn||scope.checkCurrent?.()!==true)fail('managed_compute_turn_changed');
+   const message=typeof custom==='string'?text(custom):'';
+   const matches=candidates.filter(choice=>resourceId?choice.resourceId===resourceId:
+    message&&[choice.name,choice.resourceId,choice.profileId].some(name=>exactAnswer(message,{name})));
+   return matches.length===1?acceptQuestionChoice(scope,turn,proposal,matches[0],isCurrent):null;
+  };
  }
  function acquired(scope,resource){
   const turn=current(scope);
@@ -279,6 +282,6 @@ export function createManagedComputeIntent(catalog){
    turn.discovered={alias:null,save:false,candidates};
  }
  return {recordUserTurn,current,permitsUse,continuesChannel,recordChatChannel,releaseChannel,
-  assertTurn,propose,confirmChoice,confirmQuestionChoice,bindResourceQuestion,observedChoices,acquired,
+  assertTurn,propose,confirmChoice,bindComputeChoice,bindResourceQuestion,observedChoices,acquired,
   forget(provider,threadId){const key=computeScopeKey({provider,threadId});turns.delete(key);catalog?.remove(choiceKind,key);},clear:()=>turns.clear()};
 }

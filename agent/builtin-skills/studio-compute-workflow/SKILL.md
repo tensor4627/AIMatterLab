@@ -9,7 +9,7 @@ Ordinary chat can use an authorized compute resource, inspect queues, configure 
 
 ## Select and use a resource
 
-- Call `list_compute_resources`. A name or short follow-up selects the matching listed `resource_id`. Resolve duplicates by the displayed resource or profile IDs. Call `acquire_compute_resource` using exactly one selector. Continue a `target_selected` receipt using its retry. Read the actual `acquired` result before reporting a lease.
+- Call `list_compute_resources`. A name or short follow-up selects the matching listed `resource_id`. Call `acquire_compute_resource` using exactly one selector. If the target is unresolved, AIMatterLab opens the resource picker. Continue a `target_selected` receipt using its retry. Read the actual `acquired` result before reporting a lease.
 - Choose `access: "command"` for short operations on a hosted SSH resource, `access: "service"` for a registered job service, or `access: "terminal"` for a shell. For live queues, call `run_compute_command` with that `resource_id`, a stable `request_id` and a bounded scheduler query, or use `inspect_compute_service` with `probe_scheduler: true`. Read exit and observation time. Use private site guidance for allowed queues, accounts and allocations. [Scheduler discovery and target checks](references/compute-discovery.md) covers the full selection and probe procedure.
 - With Windows OpenSSH, the user completes gateway node selection, waits for the selected node's shell and chooses **登录完成，交由 AIMatterLab 管理**. An already verified connection offers **交由 AIMatterLab 管理**. For a pending or interrupted connection, return to the original profile and read [SSH recovery and channel selection](references/connection-recovery.md). Human authentication stays in the private terminal.
 

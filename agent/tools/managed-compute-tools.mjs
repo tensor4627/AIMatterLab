@@ -77,7 +77,7 @@ function requiresWorkflowReview(task,runId){
 }
 
 /** The model selects an acquired resource and operation. Main supplies every owner and worker identity. */
-export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,assertRunIntent,assertRunSource,captureRunPreparation,onRunObserved=()=>{}}){
+export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,assertRunIntent,assertRunSource,captureRunPreparation,onRunObserved=()=>{},requestResourceChoice}){
  function scheduleIntent(scope,operation,args){
   try{
    const delegation=assertScheduleIntent?.(scope,operation,args);
@@ -131,8 +131,13 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   if(typeof text!=='string'||Buffer.byteLength(text)>256*1024)throw Error('The worker reply exceeds the run tool limit');
   try{return JSON.parse(text);}catch{throw Error('The worker returned an invalid run receipt');}
  }
- async function call(name,args,scope){
-  if(resources.owns(name))return resources.callTool(name,args,scope);
+ async function call(name,args,scope,{signal}={}){
+  if(resources.owns(name)){
+   const receipt=await resources.callTool(name,args,scope);
+   if(name!=='acquire_compute_resource'||receipt.status!=='choice_required'||!requestResourceChoice)return receipt;
+   const confirm=resources.bindComputeChoice(scope,receipt.candidates.map(candidate=>candidate.resourceId));
+   return requestResourceChoice(scope,receipt,{access:args.access,signal,confirm});
+  }
   const operation={dispatched:false,readOnly:readOnlyTools.has(name),run:null};
   try{return await perform(name,args,scope,operation);}catch(error){
    throw Object.assign(error,{operationDispatched:operation.dispatched,readOnlyOperation:operation.readOnly,...operation.run});

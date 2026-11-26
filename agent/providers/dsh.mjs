@@ -2,7 +2,7 @@ import {EventEmitter} from 'node:events';
 import {createHash,randomUUID} from 'node:crypto';
 import {dshRuntime} from '../../desktop/platform/dsh-runtime.mjs';
 import {createJsonlFramer} from './jsonl-frames.mjs';
-import {DSH_CONTROL_METHOD,DSH_QUESTION_TOOL,DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
+import {DSH_CONTROL_METHOD,DSH_QUESTION_TOOL} from './dsh-policy.mjs';
 import {DEEPSEEK_URL,redact} from './contracts.mjs';
 import {STUDIO_INSTRUCTIONS} from '../context/agent-settings.mjs';
 import {sanitizeTranscript,sanitizeProtocolTranscript,createTranscriptStream} from '../../contracts/agent/transcript-sanitizer.mjs';
@@ -51,8 +51,8 @@ export function dshLegacyContext(turns){
 
 /** AIMatterLab protocol adapter. The official DSH subprocess owns every model/tool loop. */
 export class DshBridge extends EventEmitter{
- constructor({root,catalog,credential,worker,executable,instructions=STUDIO_INSTRUCTIONS,fetchApi=fetch,host=dshRuntime,sessionProfileId,confirmResourceChoice}={}){
-  super();Object.assign(this,{root,catalog,getCredential:credential,getWorker:worker,executable,instructions,fetchApi,host,sessionProfileId,confirmResourceChoice});this.provider='deepseek';this.pending=new Map();this.questions=new Map();this.activeTurns=new Map();this.unconfirmedTurns=new Map();this.sessions=new Map();this.loaded=new Set();this.models=[];this.next=0;this.lifecycle=0;this.current=null;
+ constructor({root,catalog,credential,worker,executable,instructions=STUDIO_INSTRUCTIONS,fetchApi=fetch,host=dshRuntime,sessionProfileId}={}){
+  super();Object.assign(this,{root,catalog,getCredential:credential,getWorker:worker,executable,instructions,fetchApi,host,sessionProfileId});this.provider='deepseek';this.pending=new Map();this.questions=new Map();this.activeTurns=new Map();this.unconfirmedTurns=new Map();this.sessions=new Map();this.loaded=new Set();this.models=[];this.next=0;this.lifecycle=0;this.current=null;
  }
  event(method,params,id){this.emit('event',this.cleanProtocol({provider:'deepseek',method,params,...id===undefined?{}:{id}}));}
  cleanValue(value){return sanitizeTranscript(value,[this.getCredential()?.apiKey,this.getWorker()?.tokens?.mcp]);}
@@ -143,13 +143,6 @@ export class DshBridge extends EventEmitter{
    if(value?.status!=='verified'||value.nativeTools!==0||!Array.isArray(value.tools)||value.tools.some(n=>typeof n!=='string'||!n.startsWith(prefix)))throw Error('Invalid DSH isolation receipt');this.isolationWaiter?.resolve(value);return;
   }
   if(message.method==='subagent.started'||message.method==='subagent.finished')throw Error('Native DSH subagents are unavailable in AIMatterLab');
-  if(message.method==='studio/dshResourceQuestion'){
-   const p=message.params,s=this.byNative(p?.sessionId),active=s&&this.activeTurns.get(s.id);
-   if(active&&safeId(p.id)&&p.id.startsWith(DSH_RESOURCE_QUESTION_PREFIX)&&Array.isArray(p.options)&&p.options.every(o=>typeof o?.label==='string'&&typeof o.resourceId==='string')){
-    active.resourceQuestions??=new Map();active.resourceQuestions.set(p.id,p.options);
-   }
-   return;
-  }
   if(message.method==='user-question.cancelled'){
    const p=message.params,request=this.questions.get(p?.requestId);
    if(request&&request.sessionId===p.sessionId)this.resolveUserChoice(p.requestId,request);
@@ -164,15 +157,13 @@ export class DshBridge extends EventEmitter{
  requestUserChoice({id:rpcId,params}){
   const {requestId,sessionId,questions} = params||{},s=this.byNative(sessionId),active=s&&this.activeTurns.get(s.id);
   const q=Array.isArray(questions)&&questions.length===1?questions[0]:null;
-  const options=q?.options,resourceOptions=active?.resourceQuestions?.get(q?.id);
-  active?.resourceQuestions?.delete(q?.id);
-  const invalid=!active||!safeId(requestId)||this.questions.has(requestId)||!safeId(q?.id)||typeof q.question!=='string'||!q.question.trim()||q.multiSelect||q.intent||
-   !Array.isArray(options)||!options.length||!options.every(o=>typeof o?.label==='string'&&o.label.trim()&&(o.description===undefined||typeof o.description==='string'))||
-   (q.id.startsWith(DSH_RESOURCE_QUESTION_PREFIX)?(!resourceOptions||resourceOptions.length!==options.length||options.some((o,i)=>o.label!==resourceOptions[i].label)):q.id!=='answer');
+  const options=q?.options;
+  const invalid=!active||!safeId(requestId)||this.questions.has(requestId)||q?.id!=='answer'||typeof q.question!=='string'||!q.question.trim()||q.multiSelect||q.intent||
+   !Array.isArray(options)||!options.length||!options.every(o=>typeof o?.label==='string'&&o.label.trim()&&(o.description===undefined||typeof o.description==='string'));
   if(invalid){this.send({id:rpcId,error:{code:-32602,message:'Invalid AIMatterLab user choice'}});return;}
   const displayed=this.cleanValue({id:q.id,question:q.question,isOther:true,options});
   if(new Set(displayed.options.map(o=>o.label)).size!==options.length){this.send({id:rpcId,error:{code:-32602,message:'Ambiguous AIMatterLab options'}});return;}
-  this.questions.set(requestId,{rpcId,sessionId,threadId:s.id,turn:active.turn,question:displayed,options,resourceOptions});
+  this.questions.set(requestId,{rpcId,sessionId,threadId:s.id,turn:active.turn,question:displayed,options});
   this.event('item/tool/requestUserInput',{threadId:s.id,turnId:active.turn.id,questions:[displayed]},requestId);
  }
  resolveUserChoice(id,request){
@@ -388,14 +379,7 @@ export class DshBridge extends EventEmitter{
   const q=request.question,answer=result?.answers?.[q.id]?.answers;
   if(!Array.isArray(answer)||answer.length!==1||typeof answer[0]!=='string'||!answer[0].trim()||answer[0].length>32768)throw Error('Submit one answer to the current DeepSeek question');
   const value=this.clean(answer[0]),index=q.options.findIndex(o=>o.label===value),option=request.options[index];
-  let selected=option?[option.label]:[];
-  if(request.resourceOptions){
-   const resourceId=this.confirmResourceChoice({threadId:request.threadId,turnId:request.turn.id},{
-    offered:request.resourceOptions.map(o=>o.resourceId),resourceId:request.resourceOptions[index]?.resourceId,custom:option?undefined:value
-   });
-   const confirmed=request.resourceOptions.find(o=>o.resourceId===resourceId);
-   selected=confirmed?[confirmed.label]:[];
-  }
+  const selected=option?[option.label]:[];
   this.send({id:request.rpcId,result:{answers:[{id:q.id,selected,...selected.length?{}:{custom:value}}]}});
   this.resolveUserChoice(id,request);
   return {};

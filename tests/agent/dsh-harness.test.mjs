@@ -142,7 +142,7 @@ function messagesStream(index,{tool,text='Official harness fixture output',model
  const events=[{type:'message_start',message:{id:'fixture-message-'+index,type:'message',role:'assistant',model,content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:12,output_tokens:0}}},{type:'content_block_start',index:0,content_block:tool?{type:'tool_use',id:'fixture-call-'+index,name:tool.name,input:{}}:{type:'text',text:''}},{type:'content_block_delta',index:0,delta:tool?{type:'input_json_delta',partial_json:JSON.stringify(tool.args||{})}:{type:'text_delta',text}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:stopReason,stop_sequence:null},usage:{output_tokens:3}},{type:'message_stop'}];
  return events.map(e=>'event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n').join('');
 }
-async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog,allowDiscovery=()=>true,toolsConnected=true,toolCall=()=>({status:'fixture-only'}),confirmResourceChoice,worker,modelListing}={}){
+async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_status',args:{id:'fixture'}}},{}],toolCatalog,allowDiscovery=()=>true,toolsConnected=true,toolCall=()=>({status:'fixture-only'}),worker,modelListing}={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'studio-dsh-native-')),store=catalog(),calls=[],events=[],children=[];let count=0,held;
  const server=createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');
@@ -185,7 +185,7 @@ async function nativeFixture(t,{responses=[{tool:{name:'mcp__gpusampling__run_st
    '};\n');
  }
  const host={...dshRuntime,prepare:(...args)=>{const p=dshRuntime.prepare(...args);if(!modelListing)p.env.DEEPSEEK_BASE_URL=base;return p;},spawn:(file,args,options)=>{const child=dshRuntime.spawn(file,modelListing?['--import',pathToFileURL(preload).href,...args]:args,options);children.push(child);child.stderr.on('data',v=>fs.appendFileSync(path.join(root,'stderr.txt'),v));return child;}};
- const b=fixtureBridge({root,catalog:store,worker:worker||(()=>toolsConnected?{url:base+'/providers/deepseek',tokens:{mcp:'fixture-scoped-tool-token',admin:'never-shared'},context:{}}:null),fetchApi:(url,opts)=>fetch(url.replace('https://api.deepseek.com',base),opts),host,confirmResourceChoice});b.on('event',e=>events.push(e));
+ const b=fixtureBridge({root,catalog:store,worker:worker||(()=>toolsConnected?{url:base+'/providers/deepseek',tokens:{mcp:'fixture-scoped-tool-token',admin:'never-shared'},context:{}}:null),fetchApi:(url,opts)=>fetch(url.replace('https://api.deepseek.com',base),opts),host});b.on('event',e=>events.push(e));
  t.after(async()=>{b.close();held?.destroy();await Promise.all(children.map(child=>child.exitCode!==null||child.signalCode!==null?Promise.resolve():new Promise(r=>child.once('close',r))));server.closeAllConnections();await new Promise(r=>server.close(r));for(let i=0;i<25;i++){try{fs.rmSync(root,{recursive:true,force:true});break;}catch(error){if(i===24&&(error.code==='EPERM'||error.code==='EBUSY'))break;if(i===24)throw error;await new Promise(r=>setTimeout(r,150));}}});return {b,root,store,calls,events,children,get count(){return count;}};
 }
 function nextEvent(b,method){return new Promise((resolve,reject)=>{const listener=event=>{if(event.method===method){clearTimeout(timer);b.off('event',listener);resolve(event);}};const timer=setTimeout(()=>{b.off('event',listener);reject(Error('Missing fixture event '+method));},15000);b.on('event',listener);});}
@@ -519,25 +519,29 @@ test('official DeepSeek SDK waits for a listed choice or a custom answer with no
  assert.equal(f.calls.filter(call=>call.body.method==='tools/call').length,0);
 });
 
-test('official DeepSeek SDK surfaces a hosted choice and continues the original acquisition after desktop confirmation',{timeout:60000},async t=>{
+test('official DeepSeek SDK waits for desktop resource selection and continues the original acquisition',{timeout:60000},async t=>{
  const resources=[{name:'示例甲',resourceId:'ssh:a'},{name:'示例乙',resourceId:'ssh:b'}],acquire='mcp__gpusampling__acquire_compute_resource';
- const tool=(name,args)=>({tool:{name,args}});let confirmed=null;
+ const tool=(name,args)=>({tool:{name,args}}),waiting=Promise.withResolvers(),selected=Promise.withResolvers();let confirmed=null;
  const f=await nativeFixture(t,{
   toolCatalog:['acquire_compute_resource','inspect_compute_service'].map(name=>({name,inputSchema:{type:'object'}})),
   responses:[tool(acquire,{alias:'集群',access:'service'}),tool(acquire,{resource_id:'ssh:b',access:'service'}),
    tool('mcp__gpusampling__inspect_compute_service',{resource_id:'ssh:b',probe_scheduler:true}),{text:'Fixture queue probe complete'}],
-  confirmResourceChoice:(owner,choice)=>{assert(owner.turnId);assert.deepEqual(choice.offered,['ssh:a','ssh:b']);assert.equal(choice.resourceId,'ssh:b');confirmed=choice.resourceId;return confirmed;},
-  toolCall:({name,arguments:args})=>{
-   if(args.alias)return {status:'choice_required',candidates:resources};
+  async toolCall({name,arguments:args}){
+   if(args.alias){
+    waiting.resolve();
+    const resource=await selected.promise;confirmed=resource.resourceId;
+    return {status:'target_selected',resource,retry:{resource_id:confirmed,access:args.access}};
+   }
    if(args.resource_id!==confirmed)return {status:'permission_required'};
    return {status:name==='acquire_compute_resource'?'acquired':'observed',resource_id:confirmed};
   }
  });
- await f.b.start();const {thread}=await f.b.request('thread/start');const question=nextEvent(f.b,'item/tool/requestUserInput'),done=completion(f.b);
- const {turn}=await f.b.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'请探测集群队列'}]});const shown=await question;
- const q=shown.params.questions[0];assert.deepEqual(q.options.map(option=>option.label),resources.map(resource=>resource.name));assert.equal(f.count,1);assert.equal(confirmed,null);
- f.b.respond(shown.id,{answers:{[q.id]:{answers:['示例乙']}}});
+ await f.b.start();const {thread}=await f.b.request('thread/start'),done=completion(f.b);
+ const {turn}=await f.b.request('turn/start',{threadId:thread.id,input:[{type:'text',text:'请探测集群队列'}]});await waiting.promise;
+ assert.equal(f.count,1);assert.equal(confirmed,null);
+ selected.resolve(resources[1]);
  assert.equal((await done).id,turn.id);assert.equal(confirmed,'ssh:b');
+ assert(!f.events.some(event=>event.method==='item/tool/requestUserInput'),'The desktop owns the resource picker');
  assert.deepEqual(f.calls.filter(call=>call.body.method==='tools/call').map(call=>call.body.params.arguments),[
   {alias:'集群',access:'service'},{resource_id:'ssh:b',access:'service'},{resource_id:'ssh:b',probe_scheduler:true}
  ]);

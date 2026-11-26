@@ -58,7 +58,7 @@ const terminalTools=sharedTerminalTools.map((item,index)=>({...item,
 }));
 const tools=Object.freeze([
  tool('list_compute_resources','List resources hosted by AIMatterLab. A listed SSH resource is authenticated. commandAvailable describes its scoped command entry; canAcquire describes conversation access. Acquire the needed capability before using the resource.',{},[],true),
- tool('acquire_compute_resource','Acquire the requested capability for this conversation. Use one selector: resource_id, profile_id, or the alias the human used. For SSH, command is the default where available, terminal opens an interactive channel, and service uses the registered worker. Follow target_selected and choice_required receipts. An ordinary chat can acquire access with the user’s delegation.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['command','terminal','service']}}),
+ tool('acquire_compute_resource','Acquire the requested capability for this conversation. Use one selector: resource_id, profile_id, or the alias the human used. For SSH, command is the default where available, terminal opens an interactive channel, and service uses the registered worker. In a live chat, an unresolved target opens the AIMatterLab resource picker. Follow target_selected.retry after the user chooses. An ordinary chat can acquire access with the user’s delegation.',{resource_id:string,profile_id:string,alias:string,access:{type:'string',enum:['command','terminal','service']}}),
  tool('run_compute_command','Run one delegated command or batch on the acquired SSH command lease. Returns output, exit_code, cwd, and job_id when observed. Use an unchanged request_id when checking or retrying the same command. Reconcile an unconfirmed operation before sending a new request. A standalone cd updates only this conversation’s command directory. Environment changes apply to the current batch. Protected operations use desktop review. When present, approval_status distinguishes an explicit denial (denied), an expired review (expired), and a changed review context (changed). Prefer the worker for tracked workflows and jobs.',{
   resource_id:string,request_id:string,command:{type:'string',minLength:1,maxLength:8192}
  },['resource_id','request_id','command']),
@@ -515,7 +515,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
 
  async function availableChoices(scope,kind,access){
-  const tested=await Promise.all([...resources.values()].filter(resource=>(!kind||resource.kind===kind)&&visible(resource)).map(async resource=>{
+  const excluded=new Set(intent.current(scope)?.excluded.map(item=>item.resourceId));
+  const tested=await Promise.all([...resources.values()].filter(resource=>(!kind||resource.kind===kind)&&visible(resource)&&!excluded.has(resource.resourceId)).map(async resource=>{
    const requested=access??defaultAccess(resource);
    if(requested==='service'&&!resource.service||shellAccess(requested)&&resource.kind!=='ssh'||requested==='command'&&!commandAvailable(resource))return null;
    try{return await allowed(scope,resource,requested,{choosing:true})?resource:null;}catch(error){if(error.message==='managed_compute_context_changed')throw error;return null;}
@@ -540,6 +541,15 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  function offeredChoices(proposal,eligible){
   return proposal.candidates.filter(option=>eligible.some(resource=>option.resourceId===resource.resourceId&&option.targetFingerprint===resource.targetFingerprint)).map(candidate);
  }
+ function selectedTarget(resource,access){
+  return {choice:{status:'target_selected',resource:candidate(resource),retry:{resource_id:resource.resourceId,...access?{access}:{}}}};
+ }
+ function proposedTarget(turn,proposal,eligible,access){
+  if(turn.answer)return selectedTarget(turn.answer.choice,access);
+  const candidates=offeredChoices(proposal,eligible);
+  if(!candidates.length)fail('managed_compute_no_eligible_resource');
+  return {choice:{status:'choice_required',...proposal.alias?{alias:proposal.alias}:{},candidates}};
+ }
  async function choose(scope,args,access){
   const alias=args.alias===undefined?null:normalizeComputeAlias(args.alias);
   if(args.alias!==undefined&&!alias)fail('managed_compute_invalid_request');
@@ -558,7 +568,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    const chosen=resources.get(answer.choice.resourceId);
    if(!chosen||chosen.targetFingerprint!==answer.choice.targetFingerprint)fail('managed_compute_choice_changed');
    if(resource===chosen||alias&&alias===answer.proposal.alias)return {resource:chosen,turn,answer};
-   return {choice:{status:'target_selected',resource:candidate(chosen),retry:{resource_id:chosen.resourceId,...access?{access}:{}}}};
+   return selectedTarget(chosen,access);
+  }
+  if(turn.pending){
+   const choices=await availableChoices(scope,undefined,access);
+   intent.assertTurn(scope,turn);
+   return proposedTarget(turn,turn.pending,choices,access);
   }
   const named=turn.named.length?turn.named:turn.retained;
   if(named.length||turn.ambiguous.length){
@@ -569,15 +584,16 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    }
    const choices=await availableChoices(scope,undefined,access);
    intent.assertTurn(scope,turn);
+   if(turn.answer)return selectedTarget(turn.answer.choice,access);
    const offered=offeredChoices({candidates:[...named,...turn.ambiguous]},choices);
    if(!offered.length)fail('managed_compute_choice_changed');
    if(named.length===1&&!turn.ambiguous.length){
-    return {choice:{status:'target_selected',resource:offered[0],retry:{resource_id:offered[0].resourceId,...access?{access}:{}}}};
+    return selectedTarget(offered[0],access);
    }
    return {choice:{status:'choice_required',candidates:offered}};
   }
-  if(held&&!turn.pending)return {resource};
-  if(!turn.pending&&(args.resourceId||args.profileId)&&developerAccess(scope,resource))return {resource,turn};
+  if(held)return {resource};
+  if((args.resourceId||args.profileId)&&developerAccess(scope,resource))return {resource,turn};
   const direct=alias??normalizeComputeAlias(resource?.name);
   if(saved&&resource&&direct&&namesInChat(turn.message,direct))return {resource,turn};
   if(!alias&&resource&&aliases){
@@ -591,12 +607,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const genericAlias=(alias&&genericComputeKind(alias)?alias:null)||resource&&groupMatch(turn,['集群','ssh','cluster','本地','wsl','local'],resource);
   const requested=genericAlias||alias;
   if(!requested||!(genericComputeKind(requested)?requestsComputeName(turn.message,requested):namesInChat(turn.message,requested))){
-   if(turn.pending||!canAskForResource(turn.message,turn.discovered))fail('managed_compute_user_instruction_required');
+   if(!canAskForResource(turn.message,turn.discovered))fail('managed_compute_user_instruction_required');
    const alternatives=await availableChoices(scope,resource?.kind,access);
    intent.assertTurn(scope,turn);
    if(!alternatives.length)fail('managed_compute_no_eligible_resource');
    const proposal=intent.propose(scope,turn,{alias:null,save:false,candidates:alternatives.map(row=>({...candidate(row),targetFingerprint:row.targetFingerprint}))});
-   return {choice:{status:'choice_required',candidates:offeredChoices(proposal,alternatives)}};
+   return proposedTarget(turn,proposal,alternatives,access);
   }
   const kind=genericComputeKind(requested);
   // A known alias is never interpreted as a different running connection when
@@ -604,13 +620,12 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   if(saved&&!resource&&![...resources.values()].some(row=>row.profileId===saved.profileId))fail('managed_compute_resource_unavailable');
   const choices=await availableChoices(scope,kind,access);
   intent.assertTurn(scope,turn);
+  if(turn.pending)return proposedTarget(turn,turn.pending,choices,access);
   if(kind&&choices.length===1&&(!resource||choices[0]===resource))return {resource:choices[0],turn};
   if(!choices.length)fail('managed_compute_no_eligible_resource');
   const proposal=intent.propose(scope,turn,{alias:requested,previous:saved,save:!kind&&!!alias,
    candidates:choices.map(row=>({...candidate(row),targetFingerprint:row.targetFingerprint}))});
-  const candidates=offeredChoices(proposal,choices);
-  if(!candidates.length)fail('managed_compute_no_eligible_resource');
-  return {choice:{status:'choice_required',alias:requested,candidates}};
+  return proposedTarget(turn,proposal,choices,access);
  }
 
  function assertLease(scope,lease){
@@ -1345,9 +1360,9 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const resource=resources.get(choice.resourceId);
   return !!resource&&resource.targetFingerprint===choice.targetFingerprint&&visible(resource);
  }
- function confirmQuestionChoice(scope,data){
+ function bindComputeChoice(scope,offered){
   liveScope(scope);
-  return intent.confirmQuestionChoice(scope,data,choice=>currentChoice(scope,choice));
+  return intent.bindComputeChoice(scope,offered,choice=>currentChoice(scope,choice));
  }
  function bindResourceQuestion(scope,question){
   liveScope(scope);
@@ -1523,6 +1538,6 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return callTerminalTool(name,args,scope);
  }
  return {publish,publishWsl,noteLogin,restoreHosted,restorePublished,configureService,serviceStatus,updateService,snapshot,list,acquire,release,resolveLease,resolveSkillLibrary,resolveService,inspectService,capture,needsExplicitResource,callTerminalTool,callTool,owns,tools:()=>tools,
-  terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,confirmQuestionChoice,bindResourceQuestion,endDeveloperAccess,isDeveloperWorkspace,
+  terminalTools:()=>terminalTools,serviceRequest,listSources,eligibleProject,eligibleForWake,refreshService,revokeConnection,confirmConnectionClosed,confirmAlias,bindComputeChoice,bindResourceQuestion,endDeveloperAccess,isDeveloperWorkspace,
   recordUserTurn,sweep,stop,touch,forget,forgetProfile,assertProfileEnvironmentUpdate,profileEnvironmentUpdated,consoleEntries,observeConsoleLease,observeConsoleService,releaseFromConsole,detachLocalFromConsole};
 }

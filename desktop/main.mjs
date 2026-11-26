@@ -291,7 +291,6 @@ if(projectSkills.overlapsBundle(projectSkills.root)){
 }
 agents=new ConversationAgentHub({authCodex:codex,createCodex,initialProvider:settings.agentProvider||'codex',
  runSession:(identity,run)=>workflowContext.runInSession(identity,run),dropSession:id=>{resourceRouting.releaseSession(id);workflowContext?.dropSession(id);},instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,
- confirmResourceChoice:(scope,answer)=>workflowContext.runForScope(scope,()=>managedResources.confirmQuestionChoice(scope,answer)),
  bindResourceQuestion:(scope,question)=>{
   const checkCurrent=()=>workflowContext.sessionScopeCurrent(scope);
   return checkCurrent()?managedResources.bindResourceQuestion({...scope,checkCurrent},question):null;
@@ -562,6 +561,7 @@ worker.setProjectSkills(projectSkills);
 const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.runForScope(scope,run));
 worker.setToolScope(runToolScope);
 managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
+ resourceChoiceTitle:()=>settings.language==='en'?'Choose a compute resource for this task':'选择本次操作的计算资源',
  resourceWorkspace,terminalAuthorization:workspaceTerminalAuthorization,developerCompute,
  onConnectionLost:connectionId=>{workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},
  onConnectionReplaced:(previous,next)=>{
@@ -627,9 +627,9 @@ registerResourceToolRoutes(handle,resourceToolSetups.controller);
 const desktopAgentTools={
  tools:()=>[...managedWorkbench.desktopTools.tools(),...resourceToolSetups.tools(),conversationTitleTool],
  owns:name=>name===conversationTitleTool.name||managedWorkbench.desktopTools.owns(name)||resourceToolSetups.owns(name),
- call:(name,args,scope)=>{
+ call:(name,args,scope,options)=>{
   if(name===conversationTitleTool.name)return titleReviews.propose(args,scope);
-  return resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope);
+  return resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope,options);
  },
 };
 const conversationDraft=createConversationDraftTool({records:taskRecords,assertScope:scope=>workflowContext.assertScope(scope)});

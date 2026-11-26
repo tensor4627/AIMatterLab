@@ -3,7 +3,6 @@ import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import {AgentHub} from './agent-hub.mjs';
 import {providerId} from './contracts.mjs';
-import {DSH_RESOURCE_QUESTION_PREFIX} from './dsh-policy.mjs';
 import {providerContext} from '../tools/provider-scope.mjs';
 import {serviceHistory} from '../sessions/wake-delivery.mjs';
 import {API_PROVIDER_GROUPS} from '../../contracts/agent/model-profiles.mjs';
@@ -16,6 +15,8 @@ const key=(provider,threadId)=>provider+':'+threadId;
 const terminalTurn=turn=>['completed','failed','interrupted','cancelled','canceled'].includes(turn?.status);
 const exactThreadId=value=>typeof value==='string'&&value.length>0&&value.length<=200&&!/[\x00-\x1f]/.test(value);
 const liveItemTypes=new Set(['userMessage','agentMessage','mcpToolCall','commandExecution','fileChange','plan','contextCompaction']);
+const computeQuestionId='compute-resource';
+const choiceFailure=code=>Object.assign(Error(code),{operationNotStarted:true});
 
 function rememberLiveTurn(entry,event,params){
  const {turn,turnId,item,itemId,delta}=params,active=entry.liveTurn;
@@ -72,11 +73,6 @@ export class ConversationAgentHub extends EventEmitter{
   const hub=this.createHub({...opts,codex:provider==='codex'?this.createCodex():inertCodex,sessionProfileId:id,
    worker:p=>p===provider&&!entry.detached?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider&&!entry.detached)opts.releaseWorker?.(p,id);},
    bindWorkerContext:(p,value,binding)=>opts.bindWorkerContext?.(p,value,{...binding,sessionId:id}),
-   confirmResourceChoice:({threadId,turnId},choice)=>{
-    const scope=this.questionScope(entry,threadId,turnId);
-    if(!scope.checkCurrent())throw Error('The resource choice no longer belongs to the active conversation');
-    return opts.confirmResourceChoice?.(scope,choice);
-   },
    resourceScope:(p,method)=>entry.detached?null:opts.resourceScope?.(p,method,context(),id)});
   hub.active=provider;
   hub.on('event',event=>this.receive(entry,event));
@@ -105,15 +101,63 @@ export class ConversationAgentHub extends EventEmitter{
   if(!scope.checkCurrent())return;
   const bindings=[];
   for(const q of questions){
-   // The dedicated DeepSeek resource picker confirms its typed candidate IDs in DshBridge.
-   if(!q||typeof q.id!=='string'||typeof q.question!=='string'||q.isSecret||q.multiSelect||
-    entry.provider==='deepseek'&&q.id.startsWith(DSH_RESOURCE_QUESTION_PREFIX)||!Array.isArray(q.options)||
+   if(!q||typeof q.id!=='string'||typeof q.question!=='string'||q.isSecret||q.multiSelect||!Array.isArray(q.options)||
     !q.options.length||!q.options.every(option=>typeof option?.label==='string'))continue;
    const confirm=this.options.bindResourceQuestion(scope,{question:q.question,labels:q.options.map(option=>option.label)});
    if(confirm)bindings.push({id:q.id,confirm});
   }
   // Several independent resource selections need separate actions and scopes.
   if(bindings.length===1)this.resourceQuestions.set(event,bindings[0]);
+ }
+
+ // One desktop picker can resolve overlapping acquisitions in the same reply.
+ async requestComputeResource(scope,receipt,{access,signal,confirm,title}){
+  const entry=this.entries.get(scope.sessionId),turnId=entry?.turnId;
+  if(!turnId||entry.turnOrigin!=='human')return receipt;
+  const {threadId}=scope,owner=this.questionScope(entry,threadId,turnId);
+  const current=()=>!signal?.aborted&&entry.provider===scope.provider&&scope.checkCurrent()===true&&owner.checkCurrent();
+  if(!current())throw choiceFailure('managed_compute_choice_interrupted');
+  let pending=entry.computeChoice;
+  if(!pending){
+   const id=randomUUID(),{promise,resolve}=Promise.withResolvers();
+   const candidates=receipt.candidates,names=candidates.map(resource=>resource.name);
+   const duplicateNames=new Set(names).size!==names.length;
+   const options=new Map(candidates.map(resource=>[duplicateNames?`${resource.name} (${resource.resourceId})`:resource.name,resource.resourceId]));
+   const finish=outcome=>{
+    if(entry.computeChoice?.id!==id)return;
+    entry.computeChoice=null;
+    signal?.removeEventListener('abort',cancel);
+    resolve(outcome);
+    this.receive(entry,{method:'serverRequest/resolved',params:{threadId,requestId:id}});
+   };
+   const cancel=()=>finish({error:choiceFailure('managed_compute_choice_interrupted')});
+   const submit=result=>{
+    const values=result?.answers?.[computeQuestionId]?.answers;
+    if(!Array.isArray(values)||values.length!==1||typeof values[0]!=='string'||!values[0].trim()||values[0].length>32768)
+     throw Error('Submit one answer to the compute resource picker');
+    if(!current()){cancel();return {};}
+    const resourceId=options.get(values[0]),custom=resourceId?undefined:values[0].trim();
+    try{
+     const chosen=confirm({resourceId,custom});
+     if(chosen)finish({resourceId:chosen});
+     else if(custom)finish({custom});
+     else finish({error:choiceFailure('managed_compute_choice_changed')});
+    }catch(error){finish({error:error.staleProviderScope?choiceFailure('managed_compute_choice_interrupted'):error});}
+    return {};
+   };
+   pending=entry.computeChoice={id,promise,submit,cancel};
+   signal?.addEventListener('abort',cancel,{once:true});
+   this.receive(entry,{id,method:'item/tool/requestUserInput',params:{threadId,turnId,questions:[{
+    id:computeQuestionId,question:title,isOther:true,options:[...options.keys()].map(label=>({label}))
+   }]}});
+  }
+  const {resourceId,custom,error}=await pending.promise;
+  if(!current())throw choiceFailure('managed_compute_choice_interrupted');
+  if(error)throw error;
+  if(!resourceId)return {...receipt,user_answer:custom};
+  const resource=receipt.candidates.find(candidate=>candidate.resourceId===resourceId);
+  if(!resource)throw choiceFailure('managed_compute_no_eligible_resource');
+  return {status:'target_selected',resource,retry:{resource_id:resourceId,...access?{access}:{}}};
  }
 
  entry(provider,threadId){
@@ -143,6 +187,7 @@ export class ConversationAgentHub extends EventEmitter{
  retire(entry){
   if(entry.closed)return;
   entry.closed=true;this.entries.delete(entry.id);
+  entry.computeChoice?.cancel();
   if(this.byThread.get(key(entry.provider,entry.threadId))===entry)this.byThread.delete(key(entry.provider,entry.threadId));
   entry.hub.close();this.dropSession(entry.id);
  }
@@ -218,6 +263,7 @@ export class ConversationAgentHub extends EventEmitter{
   if(completed){
    entry.settledTurns.add(turnId);
    entry.turnId=null;
+   entry.computeChoice?.cancel();
    entry.requests.clear();
    if(entry.provider==='kimi'){
     const bridge=entry.hub.bridge('kimi'),session=bridge?.sessions?.get(threadId);
@@ -225,10 +271,10 @@ export class ConversationAgentHub extends EventEmitter{
    }
    tagged.params.studioTurnBusy=this.busy(entry);
   }
-  if(event.method==='studio/codexDisconnected'){entry.turnId=null;entry.requests.clear();}
+  if(event.method==='studio/codexDisconnected'){entry.turnId=null;entry.computeChoice?.cancel();entry.requests.clear();}
   if(event.id!==undefined&&threadId){
    entry.requests.set(String(event.id),tagged);
-   if(event.method==='item/tool/requestUserInput')this.bindQuestion(entry,tagged);
+   if(event.method==='item/tool/requestUserInput'&&entry.computeChoice?.id!==event.id)this.bindQuestion(entry,tagged);
   }
   if(event.method==='serverRequest/resolved')entry.requests.delete(String(params.requestId));
   this.emit('event',tagged);this.publishState(entry);
@@ -401,6 +447,7 @@ export class ConversationAgentHub extends EventEmitter{
   const entry=this.byThread.get(key(provider,threadId));
   const request=entry?.requests.get(String(id));
   if(!request)throw Error('Agent request no longer belongs to this conversation');
+  if(entry.computeChoice?.id===id)return entry.computeChoice.submit(result);
   const binding=this.resourceQuestions.get(request),answer=binding&&result?.answers?.[binding.id]?.answers;
   const value=entry.hub.respond(provider,id,result);
   entry.requests.delete(String(id));

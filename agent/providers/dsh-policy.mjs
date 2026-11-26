@@ -14,7 +14,6 @@ const MANAGED=new Set(['list_compute_resources','acquire_compute_resource','rele
 for(const tool of ['list_resource_tools','discover_resource_tool_scripts','plan_resource_tool_setup','read_resource_tool_setup'])MANAGED.add(tool);
 const prefix='mcp__gpusampling__';
 export const DSH_QUESTION_TOOL=prefix+'ask_user_question';
-export const DSH_RESOURCE_QUESTION_PREFIX='studio-resource-';
 export const DSH_CONTROL_METHOD='studio/dshControl';
 const questionSchema={type:'object',additionalProperties:false,required:['question','options'],properties:{
  question:{type:'string',minLength:1,maxLength:1500,description:'Direct question in the user’s language.'},
@@ -73,26 +72,6 @@ async function ask(ctx,exec,question){
  return (await ctx.userQuestions.ask({agent:exec.agent,signal:exec.signal,questions:[question]})).answers[0];
 }
 
-function resourceChoiceReceipt(result){
- if(result?.isError||result?.content?.length!==1||result.content[0]?.type!=='text')return null;
- try{
-  const value=JSON.parse(result.content[0].text);
-  return value?.status==='choice_required'&&Array.isArray(value.candidates)&&value.candidates.length&&
-   value.candidates.every(v=>typeof v?.name==='string'&&v.name.trim()&&typeof v.resourceId==='string')?value:null;
- }catch{return null;}
-}
-
-async function askResource(ctx,exec,receipt,access){
- const duplicateNames=new Set(receipt.candidates.map(resource=>resource.name)).size!==receipt.candidates.length;
- const options=receipt.candidates.map(resource=>({label:duplicateNames?`${resource.name} (${resource.resourceId})`:resource.name,resourceId:resource.resourceId}));
- const id=DSH_RESOURCE_QUESTION_PREFIX+randomUUID();
- send('studio/dshResourceQuestion',{sessionId:String(exec.agent.session.id),id,options});
- const answer=await ask(ctx,exec,{id,question:'选择本次操作的计算资源',options:options.map(({label})=>({label}))});
- const choice=options.find(option=>option.label===answer.selected[0]);
- if(!choice)return textResult({...receipt,user_answer:answer.custom});
- return textResult({status:'target_selected',resource:receipt.candidates.find(v=>v.resourceId===choice.resourceId),retry:{resource_id:choice.resourceId,...access?{access}:{}}});
-}
-
 export async function apply(ctx,config){
  try{
   await installPolicy(ctx,config);
@@ -135,15 +114,13 @@ async function installPolicy(ctx,config){
     const violations=validateJsonSchemaValue(schema,args,'arguments');if(violations.length)throw Error(violations.join('; '));
     if(!dshToolAllowed(tool.name,config.workflow))throw Error('This operation is unavailable in the current AIMatterLab conversation');
     if(tool.name==='present_task'&&args.task_id!==config.taskId)throw Error('The proposal belongs to another workflow');
-    const response=await rpc('tools/call',{name:tool.name,arguments:args},exec.signal);
-    const choice=config.interactiveQuestions&&tool.name==='acquire_compute_resource'&&resourceChoiceReceipt(response);
-    return choice?askResource(ctx,exec,choice,args.access):response;
+    return rpc('tools/call',{name:tool.name,arguments:args},exec.signal);
    }}));
   }
  }
  const inventory=(scope,toolSet)=>checkDshInventory(ctx.tools.schemas(scope,toolSet).map(t=>t.name),expected);
  ctx.tools.guard(exec=>expected.has(exec.name??exec.tool?.name)?undefined:'Only the verified AIMatterLab tools are available');
- const instructions=config.interactiveQuestions?config.instructions+'\n\nUse '+DSH_QUESTION_TOOL+' for a choice between plausible queues, approaches, or other next steps when the user’s preference is needed. For an ambiguous hosted compute resource, call acquire_compute_resource to obtain its candidate list. Its choice_required result opens the resource picker while the tool waits. Follow the retry fields of a target_selected receipt. A submitted option explicitly choosing a listed resource in a general question also identifies the target. Continue the original acquisition using its resource_id and the requested access. Use a custom answer to guide the next action. A selection requires no repeated chat message. The acquisition checks the requested capability and current project permissions.':config.instructions;
+ const instructions=config.interactiveQuestions?config.instructions+'\n\nUse '+DSH_QUESTION_TOOL+' for a choice between plausible queues, approaches, or other next steps when the user’s preference is needed. For an ambiguous hosted compute resource, call acquire_compute_resource. AIMatterLab opens the resource picker while the tool waits. A submitted option explicitly choosing a listed resource in a general question also identifies the target. Continue the original acquisition using target_selected.retry. Use a custom answer to guide the next action.':config.instructions;
  ctx.systemPrompt.section({name:'studio:instructions',order:0,text:instructions,interpolate:false,complete:true});
  ctx.on('system-prompt/assemble',async(assembly,context,next)=>{inventory(context.scope,context.toolSet);return next();});
  const openTurns=installTurnControl(ctx,steerDshAgent);

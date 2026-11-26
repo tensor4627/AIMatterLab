@@ -352,7 +352,8 @@ test('a user-selected alias uses the stable profile after rename and requires co
  assert.equal(selection.status,'choice_required');
  assert.equal(selection.candidates.length,2);
  assert.equal(aliases.read('学校集群',()=>true),null);
- await assert.rejects(manager.acquire(owner,{resourceId:'ssh:B'}),/instruction_required/);
+ assert.deepEqual(await manager.acquire(owner,{resourceId:'ssh:B'}),selection);
+ assert.deepEqual(manager.capture(owner.provider,owner.threadId).resources,[]);
  f.turn(owner,'材料中心');
  const chosen=await manager.acquire(owner,{alias:'学校集群'});
  assert.equal(chosen.resource.profileId,'A');
@@ -373,8 +374,10 @@ test('a user-selected alias uses the stable profile after rename and requires co
  f.stored.set('A',moved);f.states.set('conn-A3',verified('conn-A3',moved));
  await f.publish('A','conn-A3');
  f.turn(another,'用学校集群');
- assert.equal((await manager.acquire(another,{alias:'学校集群'})).status,'choice_required');
- await assert.rejects(manager.acquire(another,{resourceId:'ssh:A'}),/instruction_required/);
+ const replacement=await manager.acquire(another,{alias:'学校集群'});
+ assert.equal(replacement.status,'choice_required');
+ assert.deepEqual(await manager.acquire(another,{resourceId:'ssh:A'}),replacement);
+ assert.deepEqual(manager.capture(another.provider,another.threadId).resources,[]);
  f.turn(another,'材料科学中心');
  assert.equal((await manager.acquire(another,{alias:'学校集群'})).resource.profileId,'A');
  assert.equal(aliases.read('学校集群',()=>true).targetFingerprint,resourceFingerprint(moved));

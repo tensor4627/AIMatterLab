@@ -88,15 +88,17 @@ test('DeepSeek can inspect queues on the only hosted SSH target in an ordinary c
  assert.equal(f.calls.filter(call=>call==='/api/ssh-service/inspect-scheduler').length,2);
 });
 
-test('scanning a cluster directory offers a real picker, and a completed selection permits one terminal acquisition',async t=>{
+test('checking a compute environment offers its sole candidate and a confirmed selection permits one terminal acquisition',async t=>{
  const f=fixture(t),resource_id=await f.host('primary','实验室');
- f.speak('扫描一下我集群 ~/workfile 文件夹下跑过的任务，整理运行环境');
+ f.speak('检查我的计算环境');
  await f.gateway.call('list_compute_resources',{},f.scope);
  const acquire=()=>f.gateway.call('acquire_compute_resource',{resource_id,access:'terminal'},f.scope);
  const receipt=await acquire();
  assert.equal(receipt.status,'choice_required');assert.deepEqual(receipt.candidates.map(c=>c.resourceId),[resource_id]);
+ assert.deepEqual(await acquire(),receipt);
  assert.equal(f.shellRequests.length,0);
- assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered:[resource_id],resourceId:resource_id}),resource_id);
+ const confirm=f.manager.bindComputeChoice(f.scope,[resource_id]);
+ assert.equal(confirm({resourceId:resource_id}),resource_id);
  assert((await acquire()).terminal.sessionId);
  assert.equal((await acquire()).reused,true);
  assert.equal(f.shellRequests.filter(call=>call.op==='open').length,1);
@@ -149,17 +151,20 @@ test('the trusted resource picker settles a current conversation choice and pres
  f.speak('探测一下实验集群');
  const receipt=await acquire({alias:'实验集群',access:'service'});assert.equal(receipt.status,'choice_required');
  const offered=receipt.candidates.map(resource=>resource.resourceId);assert.deepEqual(offered,[a,b]);
- assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered:[a],resourceId:b}),null);
- assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered,custom:'先解释两种方案'}),null);
- assert.throws(()=>f.manager.confirmQuestionChoice({...f.scope,projectId:'different-project'},{offered,resourceId:b}),/turn_changed/);
- assert.throws(()=>f.manager.confirmQuestionChoice({...f.scope,threadId:'other-chat'},{offered,resourceId:b}),/turn_changed/);
+ const confirm=f.manager.bindComputeChoice(f.scope,offered);
+ assert.equal(f.manager.bindComputeChoice(f.scope,[a])({resourceId:b}),null);
+ assert.equal(confirm({custom:'先解释两种方案'}),null);
+ assert.throws(()=>f.manager.bindComputeChoice({...f.scope,projectId:'different-project'},offered),/turn_changed/);
+ assert.throws(()=>f.manager.bindComputeChoice({...f.scope,threadId:'other-chat'},offered),/turn_changed/);
  assert.equal(f.manager.capture(f.scope.provider,f.scope.threadId).resources.length,0);
- assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered,custom:'就是示例乙'}),b);
- assert.equal(f.manager.confirmQuestionChoice(f.scope,{offered,resourceId:a}),null);
+ assert.equal(confirm({custom:'就是示例乙'}),b);
+ assert.equal(confirm({resourceId:a}),null);
  assert.deepEqual((await acquire({resource_id:a,access:'service'})).retry,{resource_id:b,access:'service'});
  assert.equal((await acquire({resource_id:b,access:'service'})).status,'acquired');
  assert.equal((await f.gateway.call('inspect_compute_service',{resource_id:b,probe_scheduler:true},f.scope)).scheduler.observations[0].status,'observed');
  assert.deepEqual(f.manager.capture(f.scope.provider,f.scope.threadId).resources.map(resource=>resource.resourceId),[b]);
+ f.speak('检查一下计算环境');
+ assert.throws(()=>confirm({resourceId:b}),/turn_changed/);
 });
 
 test('normal conversational affirmation resolves the exact previous resource choice without lending its terminal to another chat',async t=>{

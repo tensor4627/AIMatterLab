@@ -20,7 +20,7 @@ function fields(value,expected) {
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
  records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
  worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,developerCompute,hostedServiceReplaced,
- onConnectionLost,onConnectionReplaced}) {
+ onConnectionLost,onConnectionReplaced,resourceChoiceTitle=()=>'选择本次操作的计算资源'}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -80,6 +80,9 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
   const wake=createAgentWakeDelivery({catalog,agents,dispatch,canWake:authorizedWake});
   schedules=createManagedSchedules({catalog,listSources:()=>resources.listSources({scheduleReady:true}),wake,onChange:updated});
   const computeTools=createManagedComputeTools({resources,schedules,assertWorkflow:scope=>workflow.assertScope(scope),
+    requestResourceChoice:agents.requestComputeResource?(scope,receipt,{confirm,...options})=>
+      agents.requestComputeResource(scope,receipt,{...options,title:resourceChoiceTitle(),
+        confirm:answer=>workflow.runForScope(scope,()=>confirm(answer))}):undefined,
     authorizeTask:async(task,scope)=>{if(task.customCv?.id&&(await privateAccess.assertTask(task,scope.provider)).definitionOnly)throw Error('managed_compute_private_task_scope');},
     assertScheduleIntent:(scope,action,args)=>{
       if(action==='upsert'&&agents.turnOrigin(scope.provider,scope.threadId)==='service')throw Error('managed_schedule_user_renewal_required');
@@ -99,7 +102,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     ...computeTools,
     tools:()=>[...computeTools.tools(),resourceSessionWorkspaceTool],
     owns:name=>name===resourceSessionWorkspaceTool.name||computeTools.owns(name),
-    call:(name,args,scope)=>name===resourceSessionWorkspaceTool.name?resourceWorkspace.callSessionTool(args,scope):computeTools.call(name,args,scope),
+    call:(name,args,scope,options)=>name===resourceSessionWorkspaceTool.name?resourceWorkspace.callSessionTool(args,scope):computeTools.call(name,args,scope,options),
   }:computeTools;
 
   function descriptor(resource) {

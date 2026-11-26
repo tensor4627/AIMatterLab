@@ -19,9 +19,9 @@ export function loginUrl(provider,url){
  return target.href;
 }
 export class AgentHub extends EventEmitter{
- constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime,resolveCli,instructions=STUDIO_INSTRUCTIONS,apiBridgeFactories={},sessionProfileId,confirmResourceChoice}){
+ constructor({codex,root,catalog,vault,settings,worker,releaseWorker=()=>{},bindWorkerContext,resourceScope=()=>null,fetchApi,host=providerRuntime,resolveCli,instructions=STUDIO_INSTRUCTIONS,apiBridgeFactories={},sessionProfileId}){
   super();Object.assign(this,{codex,root,catalog,vault,instructions,getSettings:settings,getWorker:worker});this.releaseWorker=releaseWorker;this.bindWorkerContext=bindWorkerContext;this.contexts=new Map();this.contextGeneration=0;this.contextPending=0;this.contextQueue=Promise.resolve();this.pristineThreads=new Set();this.attemptedThreads=new Set();this.contextResume=new Map();this.pendingTurnDispatches=new Set();this.contextClosing=new Set();this.bridgeWorkers=new Map();this.fetchApi=fetchApi;this.host=host;this.active='codex';this.bridges=new Map();this.loginStatus={};this.codexOutput=new Set();this.blankThreads=new Map();this.pendingBlankTurns=new Set();
-  this.resourceScope=resourceScope;this.resolveCli=resolveCli;this.credentialRevisions=new Map();this.apiBridgeFactories=apiBridgeFactories;this.modelProfiles=new ModelProfileStore({catalog,vault,settings});this.sessionProfileId=sessionProfileId;this.confirmResourceChoice=confirmResourceChoice;
+  this.resourceScope=resourceScope;this.resolveCli=resolveCli;this.credentialRevisions=new Map();this.apiBridgeFactories=apiBridgeFactories;this.modelProfiles=new ModelProfileStore({catalog,vault,settings});this.sessionProfileId=sessionProfileId;
   this.codex.on?.('event',event=>{
     if(event.method==='studio/codexDisconnected'){
      this.release('codex');
@@ -114,7 +114,7 @@ export class AgentHub extends EventEmitter{
  createApiBridge(provider,overrides={}){
   const options={provider,instructions:this.instructions,root:this.root,catalog:this.catalog,credential:()=>this.vault.get(provider),worker:()=>this.bridgeWorkers.get(provider),sessionProfileId:this.sessionProfileId,...this.fetchApi?{fetchApi:this.fetchApi}:{},...overrides};
   if(this.apiBridgeFactories[provider])return this.apiBridgeFactories[provider](options);
-   if(provider==='deepseek')return new DshBridge({...options,confirmResourceChoice:this.confirmResourceChoice});
+   if(provider==='deepseek')return new DshBridge(options);
    options.profiles=overrides.profiles||this.modelProfiles;
    options.credential=()=>{try{return options.profiles.resolve(provider,bridge.model).credential;}catch{return null;}};
    const bridge=new ApiModelBridge(options);return bridge;

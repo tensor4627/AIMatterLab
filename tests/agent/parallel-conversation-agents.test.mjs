@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {EventEmitter} from 'node:events';
+import {EventEmitter,on} from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,8 @@ import {createParallelAgentWorkflowContext} from '../../agent/sessions/workflow-
 import {selectConversation} from '../../agent/sessions/conversation-selection.mjs';
 import {createAgentWakeDelivery,serviceHistory} from '../../agent/sessions/wake-delivery.mjs';
 import {TerminalMcp} from '../../agent/tools/terminal-mcp.mjs';
+import {createManagedComputeTools} from '../../agent/tools/managed-compute-tools.mjs';
+import {createManagedComputeResources} from '../../backend/main/compute/managed-compute-resources.mjs';
 import {WorkerClient} from '../../agent/tools/worker-client.mjs';
 import {createAgentResourceRouting} from '../../agent/sessions/resource-routing.mjs';
 import {createAgentRequests} from '../../agent/sessions/requests.mjs';
@@ -250,6 +252,77 @@ test('same-provider and cross-provider turns keep independent processes, scope, 
  assert.equal(f.agents.isBusy('codex','alpha'),false);assert.equal(f.agents.isBusy('codex','beta'),true);assert.equal(f.agents.isBusy('deepseek','gamma'),true);
  assert.equal(c.calls.some(call=>call[0]==='turn/interrupt'),false);
  assert.equal(f.events.findLast(event=>event.method==='turn/completed').params.threadId,'alpha');
+});
+
+test('the authenticated MCP acquisition holds a desktop picker in its owning turn across providers',async t=>{
+ const profile={id:'fixture',kind:'ssh',name:'测试机',version:1,host:'fixture.invalid',port:22,username:'fixture',ssh_client:'ssh'};
+ const ref={connectionId:'fixture-connection',profileId:profile.id,profileVersion:1};
+ const resource_id='ssh:'+profile.id,receiptArgs={resource_id,access:'service'};
+ const resources=createManagedComputeResources({profiles:{read:({id})=>id===profile.id?profile:null},authorizeTerminal:()=>true,
+  terminal:{connections:{state:async()=>({...ref,status:'authenticated',authentication:'verified',capabilities:{multiplex:true}})}},
+  services:{ssh:async()=>({id:'fixture-service',generation:'fixture-generation',verify:async()=>{}})}
+ });
+ const bothWaiting=Promise.withResolvers();let requests=0;
+ const gateway=createManagedComputeTools({resources,requestResourceChoice(scope,receipt,options){
+  const pending=f.agents.requestComputeResource(scope,receipt,{...options,title:'选择本次操作的计算资源'});
+  if(scope.threadId==='alpha'&&++requests===2)bothWaiting.resolve();
+  return pending;
+ }});
+ const terminal=new TerminalMcp({terminal:{tools:()=>[]},desktopTools:gateway,
+  runScope:(scope,run)=>f.agents.runForScope(scope,()=>f.context.runForScope(scope,run)),captureScope:scope=>f.agents.captureToolScope(scope)});
+ const f=fixture({terminalGateway:terminal});
+ t.after(async()=>{f.agents.close();terminal.close();await resources.stop();});
+ await terminal.start();await resources.publish(ref);await resources.refreshService(ref);
+ async function begin(provider,threadId){
+  const bridge=await f.activate(provider,threadId),text='检查我的计算环境';
+  resources.recordUserTurn({...f.context.currentFor(provider,threadId),text,turnId:'human-'+threadId});
+  await f.send(provider,threadId,text);
+  return bridge.worker;
+ }
+ const nextEvent=async predicate=>{
+  for await(const [event] of on(f.agents,'event',{signal:AbortSignal.timeout(7000)}))if(predicate(event))return event;
+ };
+ const offer=threadId=>nextEvent(e=>e.method==='item/tool/requestUserInput'&&e.params.threadId===threadId);
+ async function call(connection,name,args,signal){
+  const response=await fetch(connection.url+'/mcp',{method:'POST',signal,headers:{Authorization:'Bearer '+connection.tokens.mcp,'Content-Type':'application/json'},
+   body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});
+  assert.equal(response.status,200);
+  return JSON.parse((await response.json()).result.content[0].text);
+ }
+ const alpha=await begin('codex','alpha'),gamma=await begin('deepseek','gamma');
+ assert.equal((await call(alpha,'list_compute_resources',{})).resources[0].resourceId,resource_id);
+ const offeredAlpha=offer('alpha'),first=call(alpha,'acquire_compute_resource',receiptArgs),duplicate=call(alpha,'acquire_compute_resource',receiptArgs);
+ const a=await offeredAlpha;await bothWaiting.promise;
+ const alphaHistory=await f.agents.rpc('codex','thread/read',{threadId:'alpha'});
+ assert.equal(alphaHistory.studioSession.requests.length,1);
+ assert.deepEqual(alphaHistory.studioSession.requests[0],a);
+ assert.equal(a.params.turnId,'turn-alpha');
+ const q=a.params.questions[0];assert.deepEqual(q.options,[{label:profile.name}]);
+ assert.deepEqual(resources.capture('codex','alpha').resources,[]);
+
+ const controller=new AbortController(),offeredGamma=offer('gamma'),waiting=call(gamma,'acquire_compute_resource',receiptArgs,controller.signal);
+ const g=await offeredGamma,answer={answers:{[q.id]:{answers:[profile.name]}}};
+ assert.notEqual(g.id,a.id);
+ assert.throws(()=>f.agents.respond('deepseek','gamma',a.id,answer),/no longer belongs/);
+ const closed=nextEvent(e=>e.method==='serverRequest/resolved'&&e.params.requestId===g.id),aborted=assert.rejects(waiting,{name:'AbortError'});
+ controller.abort();await aborted;await closed;
+ assert.throws(()=>f.agents.respond('deepseek','gamma',g.id,answer),/no longer belongs/);
+ assert.deepEqual(resources.capture('deepseek','gamma').resources,[]);
+
+ f.agents.respond('codex','alpha',a.id,answer);
+ const selected=await first;
+ assert.equal(selected.status,'target_selected');assert.deepEqual(selected.retry,receiptArgs);
+ assert.deepEqual(await duplicate,selected);
+ assert.deepEqual(resources.capture('codex','alpha').resources,[]);
+ assert.equal((await call(alpha,'acquire_compute_resource',selected.retry)).status,'acquired');
+ assert.equal(f.agents.activeTurn('codex','alpha'),'turn-alpha');
+ assert.equal(f.agents.bridge('codex','alpha').approvals.size,0);
+
+ const offeredAgain=offer('gamma'),interrupted=call(gamma,'acquire_compute_resource',receiptArgs);
+ const retryQuestion=await offeredAgain;
+ await f.agents.rpc('deepseek','turn/interrupt',{threadId:'gamma',turnId:'turn-gamma'});
+ assert.equal((await interrupted).message,'managed_compute_choice_interrupted');
+ assert.throws(()=>f.agents.respond('deepseek','gamma',retryQuestion.id,answer),/no longer belongs/);
 });
 
 test('a completed reply cannot reopen or modify its conversation during the next reply',async t=>{
