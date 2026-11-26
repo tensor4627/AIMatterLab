@@ -1,7 +1,7 @@
 import Notice from '../../ui/Notice';
 import Button from '../../ui/Button';
 import Disclosure from '../../ui/Disclosure';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
 import Tooltip from "../../ui/Tooltip";
 import {useConfirm} from '../../ui/ConfirmDialog';
 import {runContinuation} from "./run-continuation.mjs";
@@ -33,6 +33,7 @@ export default function RunDetail({run,connected=true,readOnly=false,viewActive=
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;workingRef.current=null;};},[]);
  const [workingLabel,setWorkingLabel]=useState(''),[auxiliary,setAuxiliary]=useState<{identity:string;label:string}|null>(null),[previewLoading,setPreviewLoading]=useState<{identity:string;sequence:number}|null>(null);
  const [tab,setTab]=useState('日志'),[logState,setLogState]=useState({chunks:[] as string[],truncated:false}),[files,setFiles]=useState<any[]>([]),[selected,setSelected]=useState(''),[text,setText]=useState(''),[structure,setStructure]=useState<any>(null),[frame,setFrame]=useState(0);
+ const tabRef=useRef(tab);tabRef.current=tab;
  const [logObservation,setLogObservation]=useState<ReadObservation<{offset:number;text:string}>|null>(null),logReader=useRef<ObservedRead<{offset:number;text:string}>|null>(null),connectedRef=useRef(connected);connectedRef.current=connected;
  const [image,setImage]=useState(''),[analysis,setAnalysis]=useState<any>(null);
  const [logEvidenceRange,setLogEvidenceRange]=useState<EvidenceLineRange|null>(null),[fileEvidenceRange,setFileEvidenceRange]=useState<EvidenceLineRange|null>(null);
@@ -148,7 +149,7 @@ export default function RunDetail({run,connected=true,readOnly=false,viewActive=
   const current=()=>collection.current===observed&&observed.epoch===epoch&&observed.sequence===sequence&&connectedRef.current;
   setCollectionState('loading');setCollectionError('');
   try{const r=await api('POST','/api/run/collect',{run_id:run.id});if(!current())return;if(r.run!==run.id||!Array.isArray(r.artifacts))throw Error('产物列表响应与当前作业不匹配');setFiles(r.artifacts);observed.loaded=true;setCollectionState('passed');if(manual)setTab('产物');}
-  catch(e){if(!current())return;setCollectionState('error');setCollectionError(e instanceof Error?e.message:String(e));onError(e);}
+  catch(e){if(!current())return;setCollectionState('error');setCollectionError(e instanceof Error?e.message:String(e));if(!['产物','结构'].includes(tabRef.current))onError(e);}
   finally{if(current())observed.pending=false;}
  }
  async function openFile(name:string){
@@ -156,7 +157,7 @@ export default function RunDetail({run,connected=true,readOnly=false,viewActive=
   const seq=++fileSeq.current,flight={key,sequence:seq};fileFlight.current=flight;previewSeq.current++;
   setSelected(name);setStructure(null);setImage('');setText('');setFileRange(null);setFileEvidenceRange(null);setFileError('');setLoadingFile(true);
   try{const r=await api('POST','/api/run/file',{run_id:run.id,name});if(seq!==fileSeq.current)return;setText(r.text||"");setImage(r.image||"");if(Number.isSafeInteger(r.offset)&&Number.isSafeInteger(r.size))setFileRange({offset:r.offset,size:r.size});}
-  catch(e){if(seq!==fileSeq.current)return;setFileError(e instanceof Error?e.message:String(e));onError(e);}
+  catch(e){if(seq!==fileSeq.current)return;setFileError(e instanceof Error?e.message:String(e));if(!['产物','结构'].includes(tabRef.current))onError(e);}
   finally{if(fileFlight.current===flight)fileFlight.current=null;if(seq===fileSeq.current)setLoadingFile(false);}
  }
  async function preview(){
@@ -224,7 +225,7 @@ export default function RunDetail({run,connected=true,readOnly=false,viewActive=
    {typeof corruptResume==='string'&&<><Disclosure summary={<>{tr('查看本地续算记录')}</>}><pre>{corruptResume}</pre></Disclosure><Button  disabled={working||!viewActive} onClick={()=>openResumeDiscard(corruptResume)}>{tr('已核对，清除损坏记录')}</Button></>}
   </Notice>}
   {actionMessage&&<Notice compact  >{actionMessage}</Notice>}
-  <LoadingFeedback busy={working||collectionState==='loading'||loadingFile||previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current||auxiliary?.identity===identity} label={working?workingLabel:auxiliary?.identity===identity?auxiliary.label:loadingFile?tr('正在读取文件…'):previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current?tr('正在读取结构预览…'):tr('正在读取产物列表…')}/>
+  <LoadingState busy={working||previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current||auxiliary?.identity===identity||(loadingFile||collectionState==='loading')&&!['产物','结构'].includes(tab)} label={working?workingLabel:auxiliary?.identity===identity?auxiliary.label:previewLoading?.identity===identity&&previewLoading.sequence===previewSeq.current?tr('正在读取结构预览…'):loadingFile?tr('正在读取文件…'):tr('正在读取产物列表…')}/>
   <div className="run-actions">
    {!workflowBound&&['draft','ready'].includes(run.status)&&<><Button  disabled={readOnly||!connected||working||!['draft','ready'].includes(run.status)} onClick={()=>void action('validate')}><ShieldCheck size={14}/>{tr("验证")}</Button>
    <Button variant="primary"  disabled={readOnly||!connected||working||!['draft','ready'].includes(run.status)||!!run.superseded_by||lock===run.id} onClick={()=>void action('submit')}><Play size={14}/>{tr("提交计算")}</Button></>}
@@ -233,7 +234,7 @@ export default function RunDetail({run,connected=true,readOnly=false,viewActive=
    {!workflowBound&&run.status==='unknown'&&<Button  disabled={readOnly||!connected||working} onClick={()=>void action('reconcile')}>{tr('核对停止状态')}</Button>}
    <Button  disabled={!connected||collectionState==='loading'} onClick={()=>void collect()}><Files size={14}/>{tr("收集产物")}</Button>
    {!workflowBound&&<Button tooltip={continuation.reason?tr(continuation.reason):undefined}   disabled={readOnly||!connected||!continuation.allowed||working||resumeStorageError||!!run.superseded_by||!['succeeded','failed','cancelled'].includes(run.status)} onClick={openContinuation}><RotateCw size={14}/>{tr("续算")}</Button>}
-   <Button variant="icon" size="sm" tooltip={tr("导出不可变输入与复现记录 ZIP")}   disabled={!connected} aria-label={tr("导出不可变输入与复现记录 ZIP")} onClick={()=>void auxiliaryAction(tr('正在导出运行记录…'),async()=>{await invoke('export',{run});})}><Download size={16}/></Button>
+   <Button variant="icon" size="sm" disabled={!connected} disabledReason={tr('作业服务未连接')} aria-label={tr("导出不可变输入与复现记录 ZIP")} onClick={()=>void auxiliaryAction(tr('正在导出运行记录…'),async()=>{await invoke('export',{run});})}><Download size={16} aria-hidden="true"/></Button>
   </div>
   <div className="detail-meta"><span>{tr('GPU 编号')} {run.gpu}</span><span>{tr("上限")}{run.max_seconds}s</span><span>{tr("输入已快照")}</span><span>{new Date(run.created_at*1000).toLocaleString()}</span></div>
   <div className="subtabs" role="tablist">{['概览','日志','结果','输入'].map(label=><button key={label} role="tab" aria-selected={primaryTab===label} className={primaryTab===label?'active':''} onClick={()=>{if(label==='结果'){if(!resultTab)setTab('产物');void collect(false);}else setTab(label);}}>{tr(label)}</button>)}</div>
@@ -250,9 +251,22 @@ export default function RunDetail({run,connected=true,readOnly=false,viewActive=
    {run.exit&&<Disclosure className="run-evidence" summary={<>{tr('退出状态')} · {run.exit.exit_code}</>}><pre>{JSON.stringify(run.exit,null,2)}</pre></Disclosure>}</div>}
   {tab==='输入'&&<div className="input-record"><h4>{tr('输入来源')}</h4><div className="run-input-sources">{Object.entries(run.inputs).map(([name,path])=><Disclosure className="run-evidence" key={name} summary={<>{name}</>}><code>{path}</code></Disclosure>)}</div><Disclosure className="run-evidence" summary={<>{tr('实际执行命令')}</>}><pre>{run.command.join(' ')}</pre></Disclosure><h4>{tr("科学参数")} {run.continuation_metadata?.parameter_scope==='inherited_unverified'&&<Tooltip content={tr("这些值继承自父作业，需按当前实际输入复核；checkpoint 速度尚未检查。")}><span className="tag">{tr("继承值")}</span></Tooltip>}</h4><pre>{JSON.stringify(run.parameters||{},null,2)}</pre><Disclosure className="run-evidence" summary={<>{tr('复现记录')}</>}><p>{tr('完整快照与哈希保存在 reproduction.json；原始输入不会被覆盖。')}</p></Disclosure></div>}
   {resultTab&&<div className="result-subtabs" role="group" aria-label={tr('结果视图')}>{[['产物','文件'],['曲线','曲线'],['结构','结构'],['评估','评估']].filter(([key])=>key!=='评估'||run.engine.startsWith('nep.')).map(([key,label])=><button key={key} aria-pressed={tab===key} disabled={key==='曲线'?!selected:key==='结构'?!structure:key==='评估'?!analysis:false} onClick={()=>setTab(key)}>{tr(label)}</button>)}</div>}
-  {(tab==='产物'||tab==='结构')&&<><div role="status" data-testid="artifact-observation">{tr(collectionState==='loading'?'正在读取产物列表…':collectionState==='error'?'产物列表读取失败；可点击收集产物重试。':collectionState==='stale'?'运行或连接已变化；产物列表需重新读取。':collectionState==='passed'&&!files.length?'当前结果目录为空。':'')}{collectionError&&' '+collectionError}</div><div className="artifacts-layout"><div className="file-list">{files.length?files.map(f=><button key={f.name} className={selected===f.name?'active':''} disabled={!connected} onClick={()=>void openFile(f.name)}><Files size={13}/><span>{f.name}</span><small>{(f.size/1024).toFixed(1)} KB</small></button>):<p className="muted">{tr("点击“收集产物”读取实际文件。")}</p>}</div><div className="artifact-preview">
+  {(tab==='产物'||tab==='结构')&&<>
+   {collectionState==='loading'?<LoadingState data-testid="artifact-observation" label={tr('正在读取产物列表…')}/>
+    :collectionState==='error'?<ErrorState data-testid="artifact-observation" title="产物列表读取失败"
+     retained={files.length?tr('保留上次读取的产物列表。'):undefined} details={collectionError&&<pre>{collectionError}</pre>}
+     action={<Button disabled={!connected} disabledReason={tr('作业服务未连接')} onClick={()=>void collect()}>{tr('重新读取产物列表')}</Button>}/>
+    :collectionState==='stale'?<Notice data-testid="artifact-observation" compact severity="warning">{tr('运行或连接已变化；产物列表需重新读取。')}</Notice>
+    :collectionState==='passed'&&!files.length?<EmptyState data-testid="artifact-observation" title="尚无产物" body={tr('当前结果目录为空。')}/>
+    :<div data-testid="artifact-observation"/>}
+   <div className="artifacts-layout"><div className="file-list">{files.map(f=><button key={f.name} className={selected===f.name?'active':''} disabled={!connected} onClick={()=>void openFile(f.name)}><Files size={13}/><span>{f.name}</span><small>{(f.size/1024).toFixed(1)} KB</small></button>)}{collectionState==='idle'&&!files.length&&<p className="muted">{tr('点击“收集产物”读取实际文件。')}</p>}</div><div className="artifact-preview">
    {selected&&<div className="toolbar"><span>{selected}</span><Button  onClick={()=>setTab('曲线')}>{tr("曲线")}</Button>{/\.(xyz|traj)$/.test(selected)&&<><input className="frame-input" type="number" min={0} aria-label="frame" value={frame} onChange={e=>setFrame(Number(e.target.value))}/><Button  disabled={!connected} onClick={()=>void preview()}>{tr("结构预览")}</Button></>}</div>}
-   {partialFile}{image?<img className="artifact-image" src={image} alt={selected}/>:structure&&tab==='结构'?<Structure data={structure} viewKey={JSON.stringify([identity,selected])}/>:<><CodeEditor onLineSelection={setFileEvidenceRange} value={loadingFile?tr('读取中…'):fileError||text||tr('选择一个产物查看原始输出')} onChange={()=>{}} readOnly language="plaintext"/>{connected&&!loadingFile&&!fileError&&selected&&text&&<EvidenceSelection source={{kind:'artifact',runId:run.id,name:selected,target:'run'}} text={text} range={fileEvidenceRange}/>}</>}
+   {partialFile}{loadingFile?<LoadingState label={tr('正在读取文件…')}/>
+    :fileError?<ErrorState title="无法读取产物文件" retained={tr('保留当前文件选择。')} details={<pre>{fileError}</pre>}
+     action={<Button disabled={!connected} disabledReason={tr('作业服务未连接')} onClick={()=>void openFile(selected)}>{tr('重新读取文件')}</Button>}/>
+    :image?<img className="artifact-image" src={image} alt={selected}/>
+    :structure&&tab==='结构'?<Structure data={structure} viewKey={JSON.stringify([identity,selected])}/>
+    :<><CodeEditor onLineSelection={setFileEvidenceRange} value={text||tr('选择一个产物查看原始输出')} onChange={()=>{}} readOnly language="plaintext"/>{connected&&selected&&text&&<EvidenceSelection source={{kind:'artifact',runId:run.id,name:selected,target:'run'}} text={text} range={fileEvidenceRange}/>}</>}
   </div></div></>}
   {tab==='评估'&&<pre className="report">{JSON.stringify(analysis,null,2)}</pre>}
   {tab==='曲线'&&<><Button className="back" onClick={()=>setTab('产物')}>{tr("返回产物")}</Button>{partialFile}<Chart text={text} name={selected} viewKey={JSON.stringify([identity,selected])}/></>}

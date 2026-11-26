@@ -1,7 +1,8 @@
 import Button from '../../ui/Button';
 import Notice from '../../ui/Notice';
 import Disclosure from '../../ui/Disclosure';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {ErrorState,LoadingState} from '../../ui/States';
+import {useToast} from '../../ui/Toast';
 import {useState} from 'react';
 import {Folder} from 'lucide-react';
 import type {Environment} from '../../../contracts/dto/compute';
@@ -18,13 +19,21 @@ function inventory(values:Record<string,number>){
  return Object.entries(values).map(([name,count])=>name+' '+count.toLocaleString()).join(' · ')||t('无');
 }
 
-export default function AssetInspector({worker,workerScope,projectId,environments,onSaved,onError}:{worker:boolean;workerScope:string;projectId:string;environments:Environment[];onSaved:()=>void;onError:(error:unknown)=>void}){
+export default function AssetInspector({worker,workerScope,projectId,environments,onSaved}:{worker:boolean;workerScope:string;projectId:string;environments:Environment[];onSaved:()=>void}){
  const [path,setPath]=useState(''),[kind,setKind]=useState('dataset'),[environment,setEnvironment]=useState(''),[frame,setFrame]=useState(0);
+ const {show}=useToast();
  const scope=JSON.stringify([workerScope,worker,projectId,environment,path,kind,frame]);
- const preview=useAssetRequest<any>(scope,onError),registration=useAssetRequest<any>(scope,onError),picker=useAssetRequest<string|null>(scope,onError);
+ const preview=useAssetRequest<any>(scope),registration=useAssetRequest<any>(scope),picker=useAssetRequest<string|null>(scope);
  const ready=worker&&!!projectId&&!!path.trim()&&environments.some(value=>value.id===environment),validFrame=Number.isInteger(frame)&&frame>=0;
+ const missing= !worker?'作业服务未连接':!projectId?'先选择或创建项目':!path.trim()?'请填写文件路径':'请选择计算环境。';
  function inspect(){if(!ready||!validFrame)return;void preview.execute(()=>api('POST','/api/inspect',{project_id:projectId,environment_id:environment,path,kind:'structure',frame}));}
- function register(){if(!ready)return;void registration.execute(()=>api('POST','/api/assets',{project_id:projectId,environment_id:environment,path,kind}),onSaved);}
+ function register(){
+  if(!ready)return;
+  void registration.execute(()=>api('POST','/api/assets',{project_id:projectId,environment_id:environment,path,kind}),asset=>{
+   if(asset?.id)show({severity:'success',message:t('资产已登记。')});
+   onSaved();
+  });
+ }
  const metadata=registration.value?.metadata;
  return <section className="asset-inspector" data-testid="asset-inspector">
   <div className="page-heading"><h1>{t('数据资产')}</h1></div>
@@ -35,12 +44,18 @@ export default function AssetInspector({worker,workerScope,projectId,environment
     <div className="asset-path-field"><label htmlFor="asset-path">{t('文件路径')}</label><div className="input-with-button"><input id="asset-path" data-testid="asset-path" value={path} onChange={event=>setPath(event.target.value)} placeholder={t('/home/... 或 /mnt/d/...')}/><Button variant="icon" size="sm"  aria-label={t('选择')} disabled={picker.pending} onClick={()=>void picker.execute(()=>invoke<string|null>('file.choose',{directory:false}),value=>{if(value)setPath(wslPath(value));})}><Folder size={15}/></Button></div></div>
    </div>
    <div className="asset-actions">
-    <Tooltip asChild content={t('检查真实元素与标签库存，保留原始文件和来源哈希。')}><Button variant="primary"  data-testid="asset-register" disabled={!ready||registration.pending} onClick={register}>{t(registration.pending?'检查并登记中…':'检查并登记')}</Button></Tooltip>
-    <div className="asset-frame-actions"><label>{t('结构帧序号')}<input data-testid="asset-frame" type="number" value={frame} min={0} step={1} onChange={event=>setFrame(Number(event.target.value))}/></label><Button  data-testid="asset-preview" disabled={!ready||!validFrame||preview.pending} onClick={inspect}>{t(preview.pending?'预览读取中…':'预览结构帧')}</Button></div>
+    <Button variant="primary" data-testid="asset-register" disabled={!ready||registration.pending}
+     tooltip={t('检查真实元素与标签库存，保留原始文件和来源哈希。')} disabledReason={t(registration.pending?'检查并登记中…':missing)}
+     onClick={register}>{t(registration.pending?'检查并登记中…':'检查并登记')}</Button>
+    <div className="asset-frame-actions"><label>{t('结构帧序号')}<input data-testid="asset-frame" type="number" value={frame} min={0} step={1} onChange={event=>setFrame(Number(event.target.value))}/></label><Button data-testid="asset-preview" disabled={!ready||!validFrame||preview.pending}
+     disabledReason={t(preview.pending?'预览读取中…':!ready?missing:'结构帧序号必须为非负整数。')} onClick={inspect}>{t(preview.pending?'预览读取中…':'预览结构帧')}</Button></div>
    </div>
-   <LoadingFeedback busy={preview.pending||registration.pending||picker.pending} label={t(registration.pending?'检查并登记中…':preview.pending?'预览读取中…':'正在选择文件…')}/>
+   <LoadingState busy={preview.pending||registration.pending||picker.pending} label={t(registration.pending?'检查并登记中…':preview.pending?'预览读取中…':'正在选择文件…')}/>
    {(preview.stale||registration.stale)&&<Notice compact  data-testid="asset-stale-status">{t(registration.stalePending?'输入已变化，旧结果已隐藏；已发送的登记请求仍可能完成，请核对资产列表。':registration.staleSettled?'旧登记请求已结束，结果未用于当前输入，请核对资产列表。':'输入已变化，旧结果已隐藏，请重新检查或预览。')}</Notice>}
-   {(preview.error||registration.error||picker.error)&&<Notice compact severity="error" >{preview.error||registration.error||picker.error}</Notice>}
+   {registration.error&&<ErrorState title="未能确认资产登记" retained={t('保留当前输入，请核对资产列表。')} details={<pre>{registration.error}</pre>}/>}
+   {preview.error&&<ErrorState title="无法读取结构预览" retained={t('文件路径和帧序号已保留。')} details={<pre>{preview.error}</pre>}
+    action={ready&&validFrame&&<Button onClick={inspect}>{t('重试预览')}</Button>}/>}
+   {picker.error&&<Notice compact severity="error">{picker.error}</Notice>}
   </section>
   {preview.value&&<section className="asset-section asset-result" data-testid="asset-preview-result">
    <header><h2>{t('结构预览')}</h2><Tooltip content={path}><code>{path.split(/[\\/]/).at(-1)}</code></Tooltip><span className="muted">{t('结构帧序号')} {preview.value.frame??frame}</span></header>

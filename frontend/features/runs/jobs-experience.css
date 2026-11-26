@@ -81,7 +81,7 @@
     line-height: 1.6;
   }
 
-  .jobs-filter-summary>.button,.jobs-page .empty>.button {
+  .jobs-filter-summary>.aml-button,.jobs-page .aml-empty-state>.aml-button {
     white-space: normal;
     max-width: 100%;
   }

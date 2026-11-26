@@ -1,13 +1,13 @@
 import Button from '../../ui/Button';
 import Notice from '../../ui/Notice';
 import Disclosure from '../../ui/Disclosure';
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
 import ManagedScheduleRecords from './ManagedScheduleRecords';
 import type {ManagedSnapshot} from '../../../contracts/dto/managed-compute';
 import {useState} from 'react';
 import {Activity,ArrowUpRight,MessageSquare,RefreshCw,Search,Server} from 'lucide-react';
 import {StatusBadge,statusLabel} from "../../ui/StatusBadge";
 import {t} from "../../ui/i18n";
-import Tooltip from "../../ui/Tooltip";
 import {createJobConversationLookup,filterJobs,unifiedJobs,type ClusterJob,type Job} from "../../app/workspace-shell.mjs";
 import {type Conversation} from '../../../contracts/dto/agent';
 import {type Project} from '../../../contracts/dto/compute';
@@ -31,10 +31,14 @@ export default function JobsPage({managed,managedPending=false,focusSchedule,loc
  const sourcesRead=[observations.local,observations.cluster];
  const countsKnown=sourcesRead.every(observed=>observed.loaded&&!observed.sourceChanged);
  const showSourceWarning=!countsKnown||sourcesRead.some(observed=>observed.stale);
+ const readFailed=servicePhase==='unavailable'||sources.some(source=>!observations[source].loaded&&observations[source].stale);
+ const emptySlot={'data-testid':'jobs-empty','data-guide-target':'run-empty',tabIndex:-1};
  function clearFilters(){setLocation('all');setStatus('all');setPeriod('all');setQuery('');setAllProjects(true);}
  function showPlanning(button:HTMLButtonElement){setPlanningExpanded(true);const panel=button.closest('.jobs-page')?.querySelector<HTMLDetailsElement>('#planning-overview');if(panel){panel.hidden=false;panel.open=true;const summary=panel.querySelector('summary');summary?.scrollIntoView({block:'start'});summary?.focus({preventScroll:true});}}
- return <div className="page jobs-page" data-testid="jobs-page"><div className="page-heading"><h1>{t('运行记录')}</h1><Tooltip asChild content={t('读取的是作业服务已保存的记录；同步时间不代表调度器或计算节点已核验。')}><Button  disabled={!canRefresh} onClick={onRefresh}><RefreshCw size={15}/>{t('同步记录')}</Button></Tooltip></div>
-  {servicePhase==='checking'?<Notice compact  >{t('正在核对当前作业服务并读取记录…')}</Notice>:servicePhase==='unavailable'?<Notice compact  >{t('当前作业服务尚未核对或不可用；可同步记录重新检查。')}</Notice>:readOnly&&worker?<Notice compact  >{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</Notice>:!worker&&<Notice compact  >{t('作业服务未连接；请先恢复原服务，再打开运行记录。')}</Notice>}
+ const clear=<Button onClick={clearFilters}>{t('清除筛选，查看全部记录')}</Button>;
+ const sync=<Button onClick={onRefresh}>{t('重试读取记录')}</Button>;
+ return <div className="page jobs-page" data-testid="jobs-page"><div className="page-heading"><h1>{t('运行记录')}</h1><Button tooltip={t('读取的是作业服务已保存的记录；同步时间不代表调度器或计算节点已核验。')} disabled={!canRefresh} disabledReason={t('作业服务未连接')} onClick={onRefresh}><RefreshCw size={15} aria-hidden="true"/>{t('同步记录')}</Button></div>
+  {servicePhase==='checking'?!!jobs.length&&<LoadingState label={t('正在核对当前作业服务并读取记录…')}/>:servicePhase==='unavailable'?!!jobs.length&&<Notice compact severity="warning">{t('当前作业服务尚未核对或不可用；可同步记录重新检查。')}</Notice>:readOnly&&worker?<Notice compact>{t('运行记录可查看；提交、续算等操作需匹配原服务与权限。')}</Notice>:!worker&&<Notice compact>{t('作业服务未连接；请先恢复原服务，再打开运行记录。')}</Notice>}
   <div className="jobs-overview" data-testid="jobs-overview">{[{label:'正在规划',value:planning.length,filter:'planning'},{label:'运行中',value:statusCounts.running,filter:'running'},{label:'排队中',value:statusCounts.queued,filter:'queued'},{label:'待核对',value:statusCounts.unknown,filter:'unknown'}].map(card=><button key={card.filter} data-testid={'jobs-overview-'+card.filter} aria-controls={card.filter==='planning'?'planning-overview':'jobs-records'} aria-pressed={card.filter==='planning'?undefined:status===card.filter} onClick={event=>card.filter==='planning'?showPlanning(event.currentTarget):setStatus(card.filter)}><span>{t(card.label)}</span><strong>{card.filter==='planning'?card.value:countsKnown?card.value:'—'}</strong></button>)}</div>
   <Disclosure className="jobs-planning" id="planning-overview" hidden={!planning.length&&!planningExpanded} open={planningExpanded??(planning.length>0&&planning.length<=6)} onToggle={event=>setPlanningExpanded(event.currentTarget.open)} summary={<>{t('规划中的计算流程')} · {planning.length}</>}><div className="planning-cards">{planning.map(task=>{const conversation=conversationByTaskId.get(task.id);return <button key={task.id} disabled={busy||!conversation} onClick={()=>conversation&&onConversation(conversation)}><strong>{task.name}</strong><small>{task.parameters?.engine||t('待选择引擎')} · {t(task.review?.status==='ready'?'待部署':'待完善')}</small></button>;})}</div>{!planning.length&&<p className="muted">{t('尚无规划中的计算流程')}</p>}</Disclosure>
   <Disclosure className="jobs-sources" key={showSourceWarning?'attention':'current'} open={showSourceWarning} summary={<>{t('记录来源与读取时间')}</>}><div className="job-observations">{(['local','cluster'] as const).map(source=>{const observed=observations[source];return <div key={source} data-testid={'job-observation-'+source} className={observed.stale?'stale':''}><Server size={15}/><strong>{t(source==='local'?'本地':'集群')}</strong><span>{t(observed.sourceChanged?'其他作业服务的上次记录':observed.paused?'自动同步已暂停 · 点击同步记录重试':observed.stale?servicePhase==='ready'?'记录读取失败 · 保留上次记录':'连接中断 · 状态待核对':observed.loaded?'已读取记录':'尚未读取记录')}</span><small>{t('记录读取时间')} · {time(observed.at)}</small></div>;})}</div></Disclosure>
@@ -56,7 +60,7 @@ export default function JobsPage({managed,managedPending=false,focusSchedule,loc
     <option value="all">{t('全部项目')}</option><option value="current" disabled={!projectId}>{projects.find(project=>project.id===projectId)?.name||t('当前项目')}</option>
    </select></label>
   </div></Disclosure>
-  <div className="jobs-filter-summary" data-testid="jobs-filter-summary"><div role="status"><strong>{t('显示记录')} · {jobs.length} / {observedJobs.length}</strong><span>{activeFilters.length?activeFilters.join(' · '):t('未设置筛选')}</span></div>{!!jobs.length&&!!activeFilters.length&&<Button  onClick={clearFilters}>{t('清除筛选')}</Button>}</div>
+  <div className="jobs-filter-summary" data-testid="jobs-filter-summary"><div role="status"><strong>{t('显示记录')} · {jobs.length} / {observedJobs.length}</strong><span>{activeFilters.length?activeFilters.join(' · '):t('未设置筛选')}</span></div>{!!activeFilters.length&&(!!jobs.length||servicePhase==='checking'||readFailed)&&<Button onClick={clearFilters}>{t('清除筛选')}</Button>}</div>
   {managedPending&&<Notice compact  >{t('托管资源状态待核对，显示上次记录。')}</Notice>}
   {managed&&<ManagedScheduleRecords focus={focusSchedule} notices={managed.notices||[]} sources={managed.sources} resources={managed.resources} projectId={projectOnly?projectId:undefined}/>}
   <div className="jobs-list" id="jobs-records">{jobs.map(job=>{
@@ -74,6 +78,14 @@ export default function JobsPage({managed,managedPending=false,focusSchedule,loc
      {conversation?<button className="text-button" disabled={busy} onClick={()=>onConversation(conversation)}><MessageSquare size={14}/>{t('返回会话')} · {conversation.name}</button>:<span>{t('未关联会话')}</span>}
     </div>
    </article>;
-  })}{!jobs.length&&<div className="empty" data-testid="jobs-empty" data-guide-target="run-empty" tabIndex={-1}><h3>{t(missingSource?'记录尚未读取完整':activeFilters.length?'没有匹配的运行记录':'尚无运行记录')}</h3><p>{t(missingSource?'所选来源尚未读取成功，可同步原记录后再查看。':activeFilters.length?'可清除筛选，查看全部已读取记录。':'准备计算流程后，可在此查看保存的运行记录。')}</p>{!!activeFilters.length&&<Button  onClick={()=>clearFilters()}>{t('清除筛选，查看全部记录')}</Button>}</div>}</div>
+  })}{!jobs.length&&(servicePhase==='checking'
+    ? <LoadingState {...emptySlot} label={t('正在核对当前作业服务并读取记录…')}/>
+    : readFailed
+      ? <ErrorState {...emptySlot} title="记录尚未读取完整"
+        retained={t(observedJobs.length?'记录读取失败 · 保留上次记录':'所选来源尚未读取成功，可同步原记录后再查看。')}
+        action={canRefresh?sync:undefined}/>
+      : <EmptyState {...emptySlot} title={missingSource?'记录尚未读取完整':activeFilters.length?'没有匹配的运行记录':'尚无运行记录'}
+        body={missingSource?'所选来源尚未读取成功，可同步原记录后再查看。':activeFilters.length?'可清除筛选，查看全部已读取记录。':'准备计算流程后，可在此查看保存的运行记录。'}
+        action={activeFilters.length?clear:missingSource&&canRefresh?sync:undefined}/>)}</div>
  </div>;
 }

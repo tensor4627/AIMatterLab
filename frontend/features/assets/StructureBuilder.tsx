@@ -1,7 +1,8 @@
 import Button from '../../ui/Button';
 import Notice from '../../ui/Notice';
 import Disclosure from '../../ui/Disclosure';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {ErrorState,LoadingState} from '../../ui/States';
+import {useToast} from '../../ui/Toast';
 import {useState} from 'react';
 import {api} from '../../api/worker';
 import {type Environment} from '../../../contracts/dto/compute';
@@ -10,11 +11,20 @@ import {t} from "../../ui/i18n";
 import Tooltip from "../../ui/Tooltip";
 import {useAssetRequest} from './useAssetRequest';
 import './assets.css';
-export default function StructureBuilder({projectId,environments,onSaved,onError,worker=true,workerScope='default'}:{projectId:string;environments:Environment[];onSaved:()=>void;onError:(e:unknown)=>void;worker?:boolean;workerScope?:string}){
+export default function StructureBuilder({projectId,environments,onSaved,worker=true,workerScope='default'}:{projectId:string;environments:Environment[];onSaved:()=>void;worker?:boolean;workerScope?:string}){
  const [environment,setEnvironment]=useState(''),[kind,setKind]=useState('bulk'),[name,setName]=useState('Cu'),[crystal,setCrystal]=useState(''),[a,setA]=useState(''),[repeat,setRepeat]=useState([1,1,1]);
- const request=useAssetRequest<any>(JSON.stringify([workerScope,worker,projectId,environment,kind,name,crystal,a,repeat]),onError),{value:result,pending:busy}=request;
+ const {show}=useToast();
+ const request=useAssetRequest<any>(JSON.stringify([workerScope,worker,projectId,environment,kind,name,crystal,a,repeat])),{value:result,pending:busy}=request;
  const ready=worker&&!!projectId&&!!name.trim()&&environments.some(value=>value.id===environment);
- async function build(){if(!ready)return;const recipe:any={kind,name,repeat};if(kind==='bulk'){if(crystal)recipe.crystalstructure=crystal;if(a)recipe.a=Number(a);}await request.execute(()=>api('POST','/api/structures/create',{project_id:projectId,environment_id:environment,recipe}),onSaved);}
+ const missing=!worker?'作业服务未连接':!projectId?'先选择或创建项目':!name.trim()?'请填写元素或分子名称。':'请选择计算环境。';
+ async function build(){
+  if(!ready)return;
+  const recipe:any={kind,name,repeat};if(kind==='bulk'){if(crystal)recipe.crystalstructure=crystal;if(a)recipe.a=Number(a);}
+  await request.execute(()=>api('POST','/api/structures/create',{project_id:projectId,environment_id:environment,recipe}),created=>{
+   if(created?.path)show({severity:'success',message:t('结构已保存。')});
+   onSaved();
+  });
+ }
  return <section className="asset-section structure-builder">
   <header><h2><Tooltip content={t('生成后保存为真实 extxyz 资产，重新加载检查并预览。参考晶格值会标明来源。')}>{t('ASE 结构工坊')}</Tooltip></h2></header>
   <div className="asset-fields">
@@ -28,11 +38,11 @@ export default function StructureBuilder({projectId,environments,onSaved,onError
   </div>
   <div className="asset-actions">
    <div className="asset-repeat">{repeat.map((n,i)=><label key={i}>{'Repeat '+['x','y','z'][i]}<input type="number" min={1} max={100} value={n} onChange={e=>setRepeat(repeat.map((v,j)=>j===i?Number(e.target.value):v))}/></label>)}</div>
-   <Button variant="primary"  disabled={busy||!ready} onClick={()=>void build()}>{t(busy?'生成中…':'生成结构并校验')}</Button>
+   <Button variant="primary" disabled={busy||!ready} disabledReason={t(busy?'生成中…':missing)} onClick={()=>void build()}>{t(busy?'生成中…':'生成结构并校验')}</Button>
   </div>
-  <LoadingFeedback busy={busy} label={t('生成中…')}/>
+  <LoadingState busy={busy} label={t('生成中…')}/>
   {request.stale&&<Notice compact >{t('输入已变化，旧结果已隐藏。已发送的创建请求不会因此撤销。')}</Notice>}
-  {request.error&&<Notice compact severity="error" >{request.error}</Notice>}
+  {request.error&&<ErrorState title="未能确认结构生成" retained={t('保留当前输入，请核对资产列表。')} details={<pre>{request.error}</pre>}/>}
   {result&&<section className="asset-result">
    <header><p className="structure-result-summary"><Tooltip content={result.path}><code>{result.path.split(/[\\/]/).at(-1)}</code></Tooltip> · {result.formula} · {result.n_atoms} atoms · ASE {result.provenance.version}</p></header>
    <p className="asset-check-scope"><Tooltip content={t('几何检查通过；尚未进行能量松弛或势模型验证。')}><strong>{t('几何检查')} · {t('通过')}</strong></Tooltip><span>{t('能量松弛与势模型验证尚未运行。')}</span></p>

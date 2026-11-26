@@ -1,6 +1,7 @@
 import Notice from '../../ui/Notice';
 import Button from '../../ui/Button';
-import LoadingFeedback from '../../ui/LoadingFeedback';
+import {EmptyState,ErrorState,LoadingState} from '../../ui/States';
+import {useToast} from '../../ui/Toast';
 import {useEffect,useState} from 'react';
 import {api} from '../../api/worker';
 import {invoke} from '../../api/studio';
@@ -11,10 +12,11 @@ import './cluster.css';
 
 type Selection={relative:string;rootIndex:number;load:boolean;sequence:number};
 type Loaded={relative:string;rootIndex:number;projectId:string;clusterId:string;entries:any[];text:string;file:boolean;sha256?:string;exists:boolean;previewBytes:number;size?:number;truncated:boolean};
-export default function ClusterFiles({projectId,clusterId,scope,roots,enabled,onError}:{projectId?:string;clusterId?:string;scope:string;roots:string[];enabled:boolean;onError:(error:unknown)=>void}){
+export default function ClusterFiles({projectId,clusterId,scope,roots,enabled}:{projectId?:string;clusterId?:string;scope:string;roots:string[];enabled:boolean}){
+ const toast=useToast();
  const [selection,setSelection]=useState<Selection>({relative:'',rootIndex:0,load:false,sequence:0});
  const identity=JSON.stringify([scope,projectId,clusterId,roots,enabled,selection.rootIndex,selection.relative,selection.sequence]);
- const browse=useAssetRequest<Loaded>(identity,onError),download=useAssetRequest<ClusterDownloadReceipt|null>(identity,onError);
+ const browse=useAssetRequest<Loaded>(identity),download=useAssetRequest<ClusterDownloadReceipt|null>(identity);
  const result=browse.value,busy=browse.pending||download.pending,available=enabled&&!!projectId&&!!clusterId&&selection.rootIndex<roots.length;
  function choose(relative:string,rootIndex=selection.rootIndex,load=false){setSelection(old=>({relative,rootIndex,load,sequence:old.sequence+1}));}
  useEffect(()=>{
@@ -22,15 +24,19 @@ export default function ClusterFiles({projectId,clusterId,scope,roots,enabled,on
   const target={project_id:projectId!,cluster_id:clusterId!,relative:selection.relative,root_index:selection.rootIndex};
   void browse.execute(async()=>{const data=await api('POST','/api/cluster/browse',target),file=typeof data.base64==='string';if(file&&!/^[a-f0-9]{64}$/.test(data.sha256))throw Error(t('文件预览缺少校验信息，请重新读取。'));const bytes=file?Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0)):new Uint8Array(),size=Number.isSafeInteger(data.size)&&data.size>=0?data.size:undefined;return {relative:target.relative,rootIndex:target.root_index,projectId:target.project_id,clusterId:target.cluster_id,entries:data.entries||[],text:file?new TextDecoder().decode(bytes):'',file,sha256:data.sha256,exists:!!data.exists,previewBytes:bytes.length,size,truncated:data.truncated===true||size!==undefined&&bytes.length<size};});
  },[selection]);
- async function save(){if(!available||busy||!result?.file)return;const target=result,request:ClusterDownloadRequest={project_id:target.projectId,cluster_id:target.clusterId,relative:target.relative,root_index:target.rootIndex,expected_sha256:target.sha256};await download.execute(()=>invoke<ClusterDownloadReceipt|null>('cluster.download',request));}
+ async function save(){if(!available||busy||!result?.file)return;const target=result,request:ClusterDownloadRequest={project_id:target.projectId,cluster_id:target.clusterId,relative:target.relative,root_index:target.rootIndex,expected_sha256:target.sha256};await download.execute(()=>invoke<ClusterDownloadReceipt|null>('cluster.download',request), receipt=>{
+  if(receipt)toast.show({message:t('文件已下载并通过 SHA256 核对')});
+ });}
+ const browseButton=<Button disabled={!available||busy} onClick={()=>choose(selection.relative,selection.rootIndex,true)}>{t(browse.pending?'正在读取文件…':'浏览 / 预览')}</Button>;
  return <section className="card cluster-files" data-testid="cluster-files"><div className="form-row"><label>{t('已授权读取根目录')}<select aria-label={t('已授权读取根目录')} value={selection.rootIndex} onChange={event=>choose('',Number(event.target.value))}>{roots.map((root,index)=><option key={index} value={index}>{root}</option>)}</select></label><label>{t('相对路径')}<input value={selection.relative} onChange={event=>choose(event.target.value)}/></label></div>
   {!enabled&&<Notice compact >{t('请连接作业服务并保存当前连接后浏览文件。')}</Notice>}
-  <div className="button-row"><Button  disabled={!available||busy} onClick={()=>choose(selection.relative,selection.rootIndex,true)}>{t(browse.pending?'正在读取文件…':'浏览 / 预览')}</Button>{selection.relative&&<Button  disabled={!available||busy} onClick={()=>choose(selection.relative.split('/').filter(Boolean).slice(0,-1).join('/'),selection.rootIndex,true)}>{t('上一级目录')}</Button>}</div>
-  <LoadingFeedback busy={busy} label={t(download.pending?'正在准备下载…':'正在读取文件…')}/>
-  {(browse.error||download.error)&&<Notice compact severity="error" >{browse.error||download.error}</Notice>}
+  {(!browse.error||selection.relative)&&<div className="button-row">{!browse.error&&browseButton}{selection.relative&&<Button disabled={!available||busy} onClick={()=>choose(selection.relative.split('/').filter(Boolean).slice(0,-1).join('/'),selection.rootIndex,true)}>{t('上一级目录')}</Button>}</div>}
+  <LoadingState busy={busy} label={t(download.pending?'正在准备下载…':'正在读取文件…')}/>
+  {browse.error&&<ErrorState title={browse.error} action={browseButton}/>}
+  {download.error&&<Notice compact severity="error">{download.error}</Notice>}
   {(browse.stale||download.stale)&&<Notice compact  data-testid="cluster-files-stale">{t(download.stalePending?'文件来源已变化，旧状态已隐藏；已发送的下载仍可能完成，请核对所选保存位置。':download.staleSettled?'先前下载请求已结束，结果未用于当前文件，请核对所选保存位置。':'文件路径或连接已变化，旧预览已隐藏，请重新浏览。')}</Notice>}
   {result?.entries.map(file=><button className="cluster-run-row" key={file.name} disabled={!available||busy||file.symlink} onClick={()=>choose([result.relative,file.name].filter(Boolean).join('/'),result.rootIndex,true)}><span>{file.name}</span><small>{file.directory?'directory':file.size+' B'}</small></button>)}
-  {result&&!result.exists&&<Notice compact >{t('目录尚不存在')}</Notice>}
+  {result&&!result.exists&&<EmptyState title="目录尚不存在" body={<code>{roots[result.rootIndex]}{result.relative&&' / '+result.relative}</code>}/>}
   {result?.file&&<div className="cluster-file-preview">
    <div className="cluster-file-header">
     <div className="cluster-file-heading">
@@ -41,6 +47,5 @@ export default function ClusterFiles({projectId,clusterId,scope,roots,enabled,on
    </div>
    <pre className="report">{result.text}</pre>
   </div>}
-  {download.value&&<Notice compact >{t('文件已下载并通过 SHA256 核对')}</Notice>}
  </section>;
 }

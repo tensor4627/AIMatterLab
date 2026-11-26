@@ -9,6 +9,7 @@ import {CodeEditor} from "../../ui/widgets";
 import {useConfirm} from '../../ui/ConfirmDialog';
 import {UNDO_TOAST_DURATION,useToast} from '../../ui/Toast';
 import Notice from '../../ui/Notice';
+import Disclosure from '../../ui/Disclosure';
 import ActionBar from '../../ui/ActionBar';
 import Button from '../../ui/Button';
 import RunDetail from './RunDetail';
@@ -134,7 +135,7 @@ export default function RunReview({run,draftScope,legacyDraftScopes=[],connected
    {draft.error&&!draft.conflict&&<><button className="button" disabled={working} onClick={()=>patch({})}>{t('重试保存草稿')}</button><button className="button" disabled={working} onClick={clearOtherDrafts}>{t('清理其他本地审阅草稿')}</button></>}
   </>}>
    {t(draft.conflict?'原始记录已变化或本地草稿无法读取；旧草稿保留，未自动套用。':draft.error?'本地持久化失败；修改仅保留在当前界面会话，关闭界面前请重试保存。':'本地编辑草稿已保留，尚未提交；切换页面后可继续编辑。')}
-   {draft.conflict&&draft.saved&&<details><summary>{t('查看原草稿')}</summary><pre>{JSON.stringify(draft.saved.values,null,2)}</pre></details>}
+   {draft.conflict&&draft.saved&&<Disclosure summary={t('查看原草稿')}><pre>{JSON.stringify(draft.saved.values,null,2)}</pre></Disclosure>}
   </Notice>}
   <section className="card"><h3><Tooltip content={t('任务草稿已准备。检查输入后，点击执行才会开始验证与计算。')}>{t('任务与资源')}</Tooltip></h3>
    <div className="form-row"><label>{t('计算名称')}<input disabled={working||draft.conflict} value={name} onChange={e=>patch({name:e.target.value})}/></label><label>{t('计算环境')}<select disabled={working||draft.conflict} value={environment} onChange={e=>patch({environment:e.target.value})}>{environments.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label></div>

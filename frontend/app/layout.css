@@ -811,10 +811,6 @@
     color: var(--text);
   }
 
-  .workspace-shell .conversation-sidebar .conversation-project>summary::-webkit-details-marker {
-    display: none;
-  }
-
   .workspace-shell .conversation-sidebar .conversation-project>summary:hover {
     background: var(--fill-hover);
   }
@@ -832,8 +828,8 @@
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border-radius: var(--radius-xs);
   }
@@ -1776,10 +1772,6 @@
     align-items: center;
   }
 
-  .workspace-shell .workspace-layout-menu>summary::-webkit-details-marker {
-    display: none;
-  }
-
   .workspace-shell .workspace-layout-menu>summary:hover,
 .workspace-shell .workspace-layout-menu[open]>summary {
     color: var(--text);
@@ -1976,21 +1968,19 @@
     }
   }
 
-  .conversation-project > summary .group-chevron {
+  .conversation-project > summary > .aml-disclosure-arrow {
     width: 14px;
-    flex: none;
-  }
-
-  .conversation-project[open] > summary .group-chevron {
-    transform: rotate(90deg);
+    inset-block-start: auto;
   }
 
   .workspace-layout-menu > summary {
     gap: var(--space-2);
   }
 
-  .workspace-layout-menu[open] > summary svg {
-    transform: rotate(180deg);
+  .workspace-layout-menu > summary > .aml-disclosure-arrow {
+    order: 1;
+    width: 13px;
+    inset-block-start: auto;
   }
 
   .workspace-shell .workspace-layout-menu > div {
@@ -2111,7 +2101,7 @@
       animation: ui-reveal var(--motion-snappy-dur) var(--ease-spring-snappy);
     }
 
-    .group-chevron, .tool-group-chevron, .workspace-layout-menu > summary svg, .agent-panel .send {
+    .agent-panel .send {
       transition: transform var(--motion-snappy-dur) var(--ease-spring-snappy),
       background-color var(--ui-quick) var(--ui-ease),
       box-shadow var(--ui-quick) var(--ui-ease);
