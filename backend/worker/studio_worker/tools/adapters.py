@@ -5,7 +5,8 @@ import shutil
 import sys
 from pathlib import Path
 from studio_worker.infrastructure.util import run_json, digest
-ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
+ENGINES = ('hotham.datasets','hotham.train','hotham.eval','hotham.export','hotham.diagonalize',
+           "gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
            "pydyn.sampling", "nep.train", "nep.eval", "nep.analyze", "hotpp.train", "hotpp.eval",
            "hotpp.export", "pygas.reweight", "pygas.opes-reweight", "trajectory.density")
 # Installer-only fixed scripts are not scientific engine choices or defaults.
@@ -269,6 +270,17 @@ class Adapter:
         if engine == "nep.train":
             self.require(assets, ("nep.in", "train.xyz", "test.xyz"))
             return [self.executable(environment, "nep")]
+        if engine.startswith("hotham."):
+            python = self.executable(environment, "python")
+            if engine == "hotham.datasets":
+                self.require(assets, ("generate_dataset.py",))
+                return [python, "generate_dataset.py"]
+            if engine == "hotham.diagonalize":
+                self.require(assets, ("diagonal.py",))
+                return [python, "diagonal.py", "-diag"]
+            self.require(assets, ("hotham-input.yaml",))
+            return [python, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1",
+                    "-m", "hotham.entrypoints.main", "hotham-input.yaml"]
         if engine == "hotpp.train":
             self.require(assets, ("input.yaml",))
             command = [self.executable(environment, "hotpp"), "train", "-i", "input.yaml", "-o", "model"]
@@ -351,6 +363,16 @@ class Adapter:
             validate_controls(spec.get("parameters", {}), self.engine)
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
+        modes = {"hotham.train": 0, "hotham.eval": 1, "hotham.export": 2}
+        if self.engine in modes:
+            # Parse with the target interpreter, which supplies HotHam's YAML dependency.
+            mode = modes[self.engine]
+            check = subprocess.run(
+                [self.executable(environment, "python"), "-I", "-c",
+                 "import yaml; print(yaml.safe_load(open('hotham-input.yaml'))['prediction'])"],
+                cwd=directory, capture_output=True, text=True, timeout=30)
+            if check.returncode or check.stdout.strip() != str(mode):
+                raise ValueError(f"{self.engine} requires hotham-input.yaml with prediction: {mode}")
         if not execution_only:
             self.input_contract(spec,directory)
         if self.engine == "installation.check":

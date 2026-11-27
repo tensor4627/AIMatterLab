@@ -53,11 +53,11 @@
     "id": "hotham",
     "name": "HotHam",
     "aliases": ["Hot-Ham"],
-    "integration_status": "source_only",
-    "guidance_functions": ["software.catalog"],
+    "integration_status": "native_adapter",
+    "guidance_functions": ["software.catalog","training.hotham"],
     "url": "https://github.com/liangzhixin-202169/Hot-Ham.git",
     "branch": "master",
     "guide": "aimlab-tools/SKILL.md",
-    "validated_commit": "7518adfe2cd1405de452eda362e45e55b522a836"
+    "validated_commit": "88f08b5cbaf2ef20b158a185a47aa05398e43eeb"
   }
 ]

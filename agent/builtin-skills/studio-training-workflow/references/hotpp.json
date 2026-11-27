@@ -183,8 +183,8 @@
       {
         "source_id": "studio-worker",
         "path": "studio_worker/tools/adapters.py",
-        "sha256": "7184b6da5a48b9bcaae531b17f0f42fb89ff0a782bdc8b433e969092c8da392e",
-        "bytes": 34112,
+        "sha256": "acf5a8cd068f345e55a0d5979234ea9d4712c0407647d711bd71de784d331eec",
+        "bytes": 35541,
         "observed_source": "development working tree, identified by whole-file SHA-256",
         "role": "registered_training_and_export_invocations",
         "line_ranges": [
@@ -203,8 +203,8 @@
       {
         "source_id": "studio",
         "path": "contracts/tools/engine-contracts.json",
-        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
-        "bytes": 16176,
+        "sha256": "8817427510948c26bc5ebdc83ce2d8806b718aa007b9390967842837f8fae518",
+        "bytes": 17611,
         "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
         "role": "registered_engine_contracts",
         "line_ranges": [

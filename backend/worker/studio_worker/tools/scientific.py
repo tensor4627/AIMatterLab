@@ -21,6 +21,8 @@ def probe_modules(engine):
         return ("torch", "cupy", "ase", "pygas", "pydyn", "hotpp")
     if engine.startswith("pydyn."):
         return ("torch", "cupy", "ase", "pydyn")
+    if engine.startswith("hotham."):
+        return ("torch", "ase", "hotham")
     if engine.startswith("hotpp."):
         return ("torch", "ase", "hotpp")
     if engine in ("gpumd.sampling", "pygas.build", "bias.validate") or engine.startswith("pygas."):

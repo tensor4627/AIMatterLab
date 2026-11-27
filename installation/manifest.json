@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "product": "AIMatterLab",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "repository_url": "https://github.com/tensor4627/AIMatterLab.git",
-  "release_revision": "v0.2.12",
-  "source_ref": "refs/tags/v0.2.12",
+  "release_revision": "v0.2.13",
+  "source_ref": "refs/tags/v0.2.13",
   "tool_sources": "installation/tool-sources.json",
   "desktop_platform": "Windows; WSL is used for selected local Linux execution or WSL SSH",
   "entry": "INSTALL_AGENT.md",
@@ -23,5 +23,5 @@
     "neb": "fixture_required"
   },
   "distribution_status": "signed_windows_x64",
-  "distribution_scope": "AIMatterLab 0.2.12 source and signed Windows x64 release. See docs/releases/aimatterlab-0.2.12.md for validation scope."
+  "distribution_scope": "AIMatterLab 0.2.13 source release candidate. See docs/releases/aimatterlab-0.2.13.md for validation scope."
 }

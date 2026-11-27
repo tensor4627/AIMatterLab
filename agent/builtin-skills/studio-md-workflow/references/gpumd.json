@@ -151,8 +151,8 @@
       {
         "source_id": "studio",
         "path": "contracts/tools/engine-contracts.json",
-        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
-        "bytes": 16176,
+        "sha256": "8817427510948c26bc5ebdc83ce2d8806b718aa007b9390967842837f8fae518",
+        "bytes": 17611,
         "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
         "role": "registered_engine_contracts",
         "line_ranges": [

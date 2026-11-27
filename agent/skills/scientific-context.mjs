@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createReleaseToolMatcher} from '../../contracts/tools/release-tool-sources.mjs';
 import {readReleaseToolSources} from './release-tool-catalog.mjs';
-const ENGINE_ROUTES={'trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
+const ENGINE_ROUTES={'hotham.datasets':'training.hotham','hotham.train':'training.hotham','hotham.eval':'training.hotham','hotham.export':'training.hotham','hotham.diagonalize':'training.hotham','trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
 let fallbackReleaseToolMatcher;
 function defaultReleaseToolMatcher(){
  if(!fallbackReleaseToolMatcher){

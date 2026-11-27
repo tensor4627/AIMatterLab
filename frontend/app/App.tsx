@@ -595,7 +595,7 @@ export function App(){
   finally{if(mounted.current)setBusy(false);}
  }
  function makeRun(engine:string){
-  const inputs=engine.startsWith('gpumd')?{'run.in':'','model.xyz':''}:engine.startsWith('pydyn')?{'run.py':''}:engine==='nep.eval'?{'nep.in':'','train.xyz':'','nep.txt':''}:engine==='nep.train'?{'nep.in':'','train.xyz':'','test.xyz':''}:engine==='hotpp.train'?{'input.yaml':''}:engine==='pygas.build'?{'build_bias.py':''}:{};
+  const inputs=engine==='hotham.datasets'?{'generate_dataset.py':''}:engine==='hotham.diagonalize'?{'diagonal.py':''}:engine.startsWith('hotham.')?{'hotham-input.yaml':''}:engine.startsWith('gpumd')?{'run.in':'','model.xyz':''}:engine.startsWith('pydyn')?{'run.py':''}:engine==='nep.eval'?{'nep.in':'','train.xyz':'','nep.txt':''}:engine==='nep.train'?{'nep.in':'','train.xyz':'','test.xyz':''}:engine==='hotpp.train'?{'input.yaml':''}:engine==='pygas.build'?{'build_bias.py':''}:{};
   return {name:engines.find(e=>e[0]===engine)?.[1],engine,project_id:projectId,environment_id:project?.policy.environments[0]||environments[0]?.id||'',gpu:project?.policy.gpus[0]??0,max_seconds:Math.min(3600,project?.policy.max_seconds??3600),idempotency_key:crypto.randomUUID(),inputs,parameters:{}};
  }
  function newRun(engine='gpumd.md'){

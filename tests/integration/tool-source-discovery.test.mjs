@@ -135,7 +135,7 @@ test('ordinary chat can read shipped tool guidance then fill an evidence gap fro
  const result=await call(search.name,{software:'HotHam',version:hot.validated_commit});
  const row=result.results[0];
  assert.equal(row.requested_version_match,'exact_commit');
- assert.equal(row.integration_status,'source_only');
+ assert.equal(row.integration_status,'native_adapter');
  assert.deepEqual(remoteReads,[]);
  const guide=await call('read_software_docs',{url:row.guide_url});
  const expected='https://api.github.com/repos'+new URL(hot.url).pathname.slice(0,-4)+'/contents/'+hot.guide+'?ref='+hot.validated_commit;
@@ -361,10 +361,8 @@ test('bundled skill CI rejects GPUMD NEB keys absent from the engine contract',a
   /studio-neb-workflow\/references\/neb\.json: parameter_groups\.neb differs from the gpumd\.neb engine contract/);
 });
 
-test('the HotHam source and guide do not imply a native Hamiltonian runner',()=>{
- assert.equal(sources.find(source=>source.id==='hotham').integration_status,'source_only');
+test('HotHam exposes its five native run drafts',()=>{
+ assert.equal(sources.find(source=>source.id==='hotham').integration_status,'native_adapter');
  const card=workflowCatalog.find(tool=>tool.id==='hamiltonian');
- assert.equal(card.status,'planned');
- assert.deepEqual(card.engines,[]);
- assert.match(card.description,/收录 HotHam 源码和交付指南.*原生计算后端待接入/);
+ assert.deepEqual(card.engines,['hotham.datasets','hotham.train','hotham.eval','hotham.export','hotham.diagonalize']);
 });

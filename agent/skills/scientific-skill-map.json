@@ -253,6 +253,7 @@
     }
   ],
   "functions": [
+    {"id": "training.hotham", "title": "HotHam 哈密顿量计算", "engines": ["hotham.datasets", "hotham.train", "hotham.eval", "hotham.export", "hotham.diagonalize"], "skills": ["studio-tool-discovery"], "tools": [], "status": "native_adapter", "phase": "execution", "reference_files": {"studio-tool-discovery": ["references/hotham.md"]}},
     {
       "id": "software.catalog",
       "title": "科学工具目录、源码、安装与验证路径（含 HotHam）",

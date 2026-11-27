@@ -2,6 +2,66 @@
   "schema_version": 1,
   "scope": "Adapter input contract only. Alias mapping uses explicit existing facts, rejects conflicts, and never proves scientific or serialized-model correctness. File parameters must identify an actual files entry by its preserved basename. Reserved parameters.validation accepts only the declared numerical FD controls on supported sampling/validation routes. Runtime state, scope, missing-information lists and review commentary belong in step descriptions or a separate saved review manifest, never required editable scientific fields. An empty diagnostic list means no issue; it is not missing scientific input.",
   "engines": {
+    "hotham.datasets": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "generate_dataset.py"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_tokens": [
+        "generate_dataset.py"
+      ]
+    },
+    "hotham.train": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "hotham-input.yaml"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_tokens": [
+        "hotham-input.yaml"
+      ]
+    },
+    "hotham.eval": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "hotham-input.yaml"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_tokens": [
+        "hotham-input.yaml"
+      ]
+    },
+    "hotham.export": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "hotham-input.yaml"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_tokens": [
+        "hotham-input.yaml"
+      ]
+    },
+    "hotham.diagonalize": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "diagonal.py"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_tokens": [
+        "diagonal.py"
+      ]
+    },
     "trajectory.density": {
       "required_parameters": [], "input_file_parameters": [], "aliases": {},
       "required_inputs": ["trajectory.xyz"], "declaration_tokens": [],
@@ -606,7 +666,8 @@
     "gpu-sampling": "gpumd",
     "pygas": "pygas",
     "pydyn": "pydyn",
-    "hotpp": "hotpp"
+    "hotpp": "hotpp",
+    "hotham": "hotham"
   },
   "aimlab_contract_note": "Neutral production contract distributed with the AIMatterLab tool-integration skill. Internal AimLab declarations bind to these engine rules; declaration files must not reference AIMatterLab repository source paths."
 }

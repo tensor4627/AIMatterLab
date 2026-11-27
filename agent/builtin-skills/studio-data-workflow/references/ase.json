@@ -66,8 +66,8 @@
       {
         "source_id": "studio-worker",
         "path": "studio_worker/tools/scientific.py",
-        "sha256": "15a4bdca31b5f7c00daad6142779faed61ce4af501f5380b5a11afe6512f7953",
-        "bytes": 9041,
+        "sha256": "2ad00e5d0b62b4a516349a192dccca267f4675ae28eacdfbe7b80bb50b8193b3",
+        "bytes": 9120,
         "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
         "role": "frame_and_label_inspection",
         "line_ranges": [

@@ -199,7 +199,7 @@ def draft(service, proposal):
     if not isinstance(proposal,dict) or set(proposal)-{'name','executables','repositories','variables'}:raise ValueError('Only environment paths and loader settings may be proposed')
     name=proposal.get('name')
     if not isinstance(name,str) or not name.strip() or len(name)>120:raise ValueError('Environment name required')
-    for key,allowed in (('executables',{'python','gpumd','gpu-sampling','nep','hotpp','pygas'}),('repositories',{'pydyn','pygas','hotpp','gpumd'})):
+    for key,allowed in (('executables',{'python','gpumd','gpu-sampling','nep','hotpp','pygas'}),('repositories',{'pydyn','pygas','hotpp','hotham','gpumd'})):
         values=proposal.get(key,{})
         if not isinstance(values,dict) or set(values)-allowed:raise ValueError('Unsupported environment path keys')
         if any(not isinstance(path,str) or len(path)>4096 or not path.startswith('/') or any(c in path for c in ('\n','\r','\0')) for path in values.values()):raise ValueError('Absolute Linux environment paths required')
