@@ -7,9 +7,11 @@ from pathlib import Path
 from studio_worker.infrastructure.util import run_json, digest
 ENGINES = ("gpumd.neb", "gpumd.md", "pydyn.md", "pygas.build", "bias.validate", "gpumd.sampling",
            "pydyn.sampling", "nep.train", "nep.eval", "nep.analyze", "hotpp.train", "hotpp.eval",
-           "hotpp.export", "pygas.reweight", "pygas.opes-reweight", "trajectory.density")
+           "hotpp.export", "pygas.reweight", "pygas.opes-reweight", "trajectory.density",
+           "hotham.datasets", "hotham.train", "hotham.eval", "hotham.export", "hotham.diagonalize")
 # Installer-only fixed scripts are not scientific engine choices or defaults.
 SUPPORTED_ENGINES = ENGINES + ("installation.check",)
+HOTHAM_PREDICTION_MODES = {"hotham.train": (-1, 0), "hotham.eval": (1,), "hotham.export": (2,)}
 # Migration set: declaration-driven prepare is the default for routes whose production argv
 # is parity-checked against this adapter. A declaration may replace only argv construction;
 # the built-in adapter still validates inputs, parameters, walkers and numerical controls.
@@ -269,6 +271,17 @@ class Adapter:
         if engine == "nep.train":
             self.require(assets, ("nep.in", "train.xyz", "test.xyz"))
             return [self.executable(environment, "nep")]
+        if engine.startswith("hotham."):
+            python = self.executable(environment, "python")
+            if engine == "hotham.datasets":
+                self.require(assets, ("generate_dataset.py",))
+                return [python, "generate_dataset.py"]
+            if engine == "hotham.diagonalize":
+                self.require(assets, ("diagonal.py",))
+                return [python, "diagonal.py", "-diag"]
+            self.require(assets, ("hotham-input.yaml",))
+            return [python, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=1",
+                    "-m", "hotham.entrypoints.main", "hotham-input.yaml"]
         if engine == "hotpp.train":
             self.require(assets, ("input.yaml",))
             command = [self.executable(environment, "hotpp"), "train", "-i", "input.yaml", "-o", "model"]
@@ -295,6 +308,18 @@ class Adapter:
             return [self.executable(environment, "pygas"), "reweight", p["bias_file"], "GASGaussian.txt", "fes.yaml"]
         self.require(assets, ("OPES_COLVAR", "fes.yaml"))
         return [self.executable(environment, "pygas"), "opes-reweight", "OPES_COLVAR", "fes.yaml"]
+
+    def hotham_mode_contract(self, environment, directory):
+        """The same upstream executable runs all three tasks. The YAML selects its operation."""
+        result = run_json(self.executable(environment, "python"), SCIENTIFIC, "hotham-mode",
+                          {"path": str(Path(directory) / "hotham-input.yaml")},
+                          process_env(environment), timeout=30)
+        modes = HOTHAM_PREDICTION_MODES[self.engine]
+        if result["prediction"] not in modes:
+            allowed = " or ".join(map(str, modes))
+            raise ValueError(f"{self.engine} requires hotham-input.yaml with prediction: {allowed}")
+        return {"status": "passed", "prediction": result["prediction"],
+                "scope": "HotHam operation selected by the execution input", "scientific_status": "not_run"}
 
     def input_contract(self, spec, directory):
         """Compare declared simple GPUMD controls with the actual immutable input.
@@ -351,6 +376,8 @@ class Adapter:
             validate_controls(spec.get("parameters", {}), self.engine)
         runtime = self.runtime_check(environment)
         p, directory = spec.get("parameters", {}), Path(directory)
+        if self.engine in HOTHAM_PREDICTION_MODES:
+            return {**self.hotham_mode_contract(environment, directory), "native_runtime": runtime}
         if not execution_only:
             self.input_contract(spec,directory)
         if self.engine == "installation.check":

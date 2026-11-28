@@ -10,7 +10,7 @@ export function scienceOnly(parameters,steps=[],missing=[]){
  const science=strip(parameters);return {parameters:science,steps:steps.map(s=>typeof s==='string'?s:{...s,fields:s.fields.filter(f=>!deploymentField(f.key))}).filter(s=>typeof s==='string'||s.fields.length||!/部署|队列|集群|提交|deployment|queue|submit/i.test(s.title)),missing:missing.filter(k=>{try{return !deploymentField(k);}catch{return true;}}),hints};
 }
 
-const engines=new Set(['trajectory.density','gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
+const engines=new Set(['hotham.datasets','hotham.train','hotham.eval','hotham.export','hotham.diagonalize','trajectory.density','gpumd.neb','gpumd.md','pydyn.md','gpumd.sampling','pydyn.sampling','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']);
 
 export function scientificSpec(task){
  if(task.composition&&(task.composition.status!=='rendered'||task.composition.render_blocked))throw Error('CV/bias组合图尚不能生成；先在原会话补齐、保存并复核当前输入');

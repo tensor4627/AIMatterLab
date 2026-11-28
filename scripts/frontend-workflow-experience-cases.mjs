@@ -27,8 +27,19 @@ export async function frontendWorkflowExperienceCases({check,out}){
   assert.match(await page.getByTestId('workflow-requirements').innerText(),/核对拟用的计算队列/);
   assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>['task.edit','task.execute'].includes(c.method)).length),0);
  });
- await check('workflow-experience-hamiltonian-directory-opens-planned-tool',async page=>{
-  await page.evaluate(()=>window.renderTest('App'));
+ await check('workflow-experience-hamiltonian-directory-opens-native-drafts',async page=>{
+  const routes=[
+   ['数据集生成','hotham.datasets','generate_dataset.py'],
+   ['模型训练','hotham.train','hotham-input.yaml'],
+   ['独立评估','hotham.eval','hotham-input.yaml'],
+   ['哈密顿量重构','hotham.export','hotham-input.yaml'],
+   ['能带与 DOS','hotham.diagonalize','diagonal.py'],
+  ];
+  await page.evaluate(engines=>{
+   window.__test.workerStatus={status:'connected',checkedAt:1};
+   window.__test.project.policy.engines=engines;
+   return window.renderTest('App');
+  },routes.map(([,engine])=>engine));
   await page.locator('nav').getByTestId('navigate-tools').click();
   const computeGroup = page.getByTestId('tools-directory').locator('section').filter({
    has: page.getByRole('heading',{name:'计算与建模',exact:true})
@@ -36,11 +47,20 @@ export async function frontendWorkflowExperienceCases({check,out}){
   await computeGroup.getByTestId('open-tool-hamiltonian').click();
   const detail = page.locator('.tool-page');
   await detail.getByRole('heading',{name:'机器学习哈密顿量',exact:true}).waitFor();
-  assert.match(await detail.locator('[data-severity]').innerText(),/后端待接入/);
-  for(const label of ['数据准备','模型训练','独立评估','哈密顿量重构','能带分析']){
-   await detail.locator('.tool-capabilities').getByText(label,{exact:true}).waitFor();
+  assert.equal(await detail.getByRole('button',{name:'数据集生成',exact:true}).isDisabled(),true);
+  await page.getByTestId('open-project-selector').click();
+  await page.getByRole('dialog',{name:'计算项目',exact:true}).getByRole('button',{name:'Fixture project',exact:true}).click();
+  for(const [label,engine,input] of routes){
+   await detail.getByRole('button',{name:label,exact:true}).click();
+   const draft=page.getByRole('dialog',{name:'高级：原生计算草稿'});
+   assert.equal(await draft.getByRole('combobox').filter({has:page.locator('option[value="hotham.train"]')}).inputValue(),engine);
+   await page.waitForFunction(engine=>JSON.parse(document.querySelector('[role="dialog"] .json-input')?.value||'{}').engine===engine,engine);
+   const spec=JSON.parse(await draft.locator('textarea').inputValue());
+   assert.equal(spec.engine,engine);assert.deepEqual(spec.inputs,{[input]:''});
+   assert.match(await draft.innerText(),/HotHam 作业的已授权源文件路径/);
+   await draft.press('Escape');
   }
-  assert.deepEqual(await detail.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.dataset.testid)),['pin-tool']);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.method==='task.execute'||call.method==='worker.request'&&call.data.method==='POST'&&call.data.target?.startsWith('/api/run/')).length),0);
   await snapshot(page,'hamiltonian-tool');
   await page.locator('nav').getByTestId('navigate-tools').click();
   await page.getByTestId('open-tool-training').waitFor();

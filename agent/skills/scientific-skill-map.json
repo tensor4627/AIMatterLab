@@ -254,6 +254,17 @@
   ],
   "functions": [
     {
+      "id": "training.hotham",
+      "title": "HotHam 哈密顿量计算",
+      "engines": ["hotham.datasets", "hotham.train", "hotham.eval", "hotham.export", "hotham.diagonalize"],
+      "skills": ["studio-tool-discovery"],
+      "tools": ["describe_engine"],
+      "status": "implemented_adapter_with_bundled_guidance",
+      "phase": "authoring",
+      "adaptation": "Use the focused HotHam reference for the selected Hamiltonian operation. Inspect the engine contract and the actual target environment before execution.",
+      "reference_files": {"studio-tool-discovery": ["references/hotham.md"]}
+    },
+    {
       "id": "software.catalog",
       "title": "科学工具目录、源码、安装与验证路径（含 HotHam）",
       "engines": [],

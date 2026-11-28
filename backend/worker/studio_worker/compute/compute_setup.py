@@ -13,7 +13,7 @@ from pathlib import Path
 INSPECT = r'''
 import importlib.util,json,sys
 modules={}
-for name in ('ase','numpy','torch','cupy','pydyn','hotpp','base'):
+for name in ('ase','numpy','torch','cupy','pydyn','hotpp','hotham','base'):
  try:
   spec=importlib.util.find_spec(name)
   modules[name]={'available':spec is not None,'origin':spec.origin if spec else None}
@@ -88,8 +88,9 @@ def discover(service, force=False):
 def _discover(service, force=False):
     if not isinstance(force,bool):raise ValueError('force must be boolean')
     paths=candidates(service);native=native_paths(service)
-    sources={s['id']:s['root'] for s in service.store.list('source-project') if s['id'] in ('pydyn','pygas','hotpp')}
-    identity=signature({'python':[(p,os.stat(p).st_mtime_ns,os.stat(p).st_size) for p in paths], 'native':[(k,v,os.stat(v).st_mtime_ns) for k,v in sorted(native.items())], 'sources':sources})
+    source_modules={'pydyn':'pydyn','pygas':'base','hotpp':'hotpp','hotham':'hotham'}
+    sources={s['id']:s['root'] for s in service.store.list('source-project') if s['id'] in source_modules}
+    identity=signature({'python':[(p,os.stat(p).st_mtime_ns,os.stat(p).st_size) for p in paths], 'native':[(k,v,os.stat(v).st_mtime_ns) for k,v in sorted(native.items())], 'sources':sources,'modules':source_modules})
     prior=next(iter(service.store.list('compute-discovery')),None)
     if not force and prior and prior.get('identity')==identity and time.time()-prior['observed_at']<86400:
         return {**prior,'cached':True}
@@ -106,12 +107,12 @@ def _discover(service, force=False):
             line=next((line for line in output.stdout.splitlines() if line.startswith('__STUDIO_COMPUTE__')),None)
             if output.returncode or not line:raise ValueError('Interpreter could not return its discovery receipt')
             observed=json.loads(line.removeprefix('__STUDIO_COMPUTE__'))
-            modules=observed['modules'];scientific=any(modules[name]['available'] for name in ('ase','pydyn','hotpp','base'))
+            modules=observed['modules'];scientific=any(modules[name]['available'] for name in ('ase',*source_modules.values()))
             if not scientific:
                 entries.append({'python':python,'status':'blocked','reason':'No supported scientific packages found','observation':observed});continue
             # Sources are recorded only from the actual installed/importable module origin.
             repositories={}
-            for name,module in (('pydyn','pydyn'),('pygas','base'),('hotpp','hotpp')):
+            for name,module in source_modules.items():
                 origin=modules[module].get('origin')
                 if origin and Path(origin).is_file():repositories[name]=str(Path(origin).resolve().parent.parent)
             variables={}
@@ -199,7 +200,7 @@ def draft(service, proposal):
     if not isinstance(proposal,dict) or set(proposal)-{'name','executables','repositories','variables'}:raise ValueError('Only environment paths and loader settings may be proposed')
     name=proposal.get('name')
     if not isinstance(name,str) or not name.strip() or len(name)>120:raise ValueError('Environment name required')
-    for key,allowed in (('executables',{'python','gpumd','gpu-sampling','nep','hotpp','pygas'}),('repositories',{'pydyn','pygas','hotpp','gpumd'})):
+    for key,allowed in (('executables',{'python','gpumd','gpu-sampling','nep','hotpp','pygas'}),('repositories',{'pydyn','pygas','hotpp','hotham','gpumd'})):
         values=proposal.get(key,{})
         if not isinstance(values,dict) or set(values)-allowed:raise ValueError('Unsupported environment path keys')
         if any(not isinstance(path,str) or len(path)>4096 or not path.startswith('/') or any(c in path for c in ('\n','\r','\0')) for path in values.values()):raise ValueError('Absolute Linux environment paths required')

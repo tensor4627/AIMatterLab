@@ -6,8 +6,8 @@ import math
 import re
 
 FACTS={'schema_version','environment_id','engine','configuration_sha256','observed_at','state','probe_status','probe_attempted_at','failure_type','reason','python','executables','modules','repositories','native_runtime','capabilities','cuda','source_build_relation','scientific_status','scope','file_observations_status'}
-KNOWN_SOFTWARE={'pydyn','pygas','hotpp','gpumd','torchnep'}
-KNOWN_MODULES={'torch','cupy','ase','pydyn','pygas','hotpp'}
+KNOWN_SOFTWARE={'pydyn','pygas','hotpp','gpumd','torchnep','hotham'}
+KNOWN_MODULES={'torch','cupy','ase','pydyn','pygas','hotpp','hotham'}
 KNOWN_EXECUTABLES={'python','gpumd','gpu-sampling','nep','hotpp'}
 PYGAS_FLAGS={'CVOnlyProcedure','MetaDProcedure','WTMetaDProcedure','OPESProcedure','export_model_bundle'}
 

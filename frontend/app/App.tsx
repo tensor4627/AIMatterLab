@@ -595,7 +595,7 @@ export function App(){
   finally{if(mounted.current)setBusy(false);}
  }
  function makeRun(engine:string){
-  const inputs=engine.startsWith('gpumd')?{'run.in':'','model.xyz':''}:engine.startsWith('pydyn')?{'run.py':''}:engine==='nep.eval'?{'nep.in':'','train.xyz':'','nep.txt':''}:engine==='nep.train'?{'nep.in':'','train.xyz':'','test.xyz':''}:engine==='hotpp.train'?{'input.yaml':''}:engine==='pygas.build'?{'build_bias.py':''}:{};
+  const inputs=engine==='hotham.datasets'?{'generate_dataset.py':''}:engine==='hotham.diagonalize'?{'diagonal.py':''}:engine.startsWith('hotham.')?{'hotham-input.yaml':''}:engine.startsWith('gpumd')?{'run.in':'','model.xyz':''}:engine.startsWith('pydyn')?{'run.py':''}:engine==='nep.eval'?{'nep.in':'','train.xyz':'','nep.txt':''}:engine==='nep.train'?{'nep.in':'','train.xyz':'','test.xyz':''}:engine==='hotpp.train'?{'input.yaml':''}:engine==='pygas.build'?{'build_bias.py':''}:{};
   return {name:engines.find(e=>e[0]===engine)?.[1],engine,project_id:projectId,environment_id:project?.policy.environments[0]||environments[0]?.id||'',gpu:project?.policy.gpus[0]??0,max_seconds:Math.min(3600,project?.policy.max_seconds??3600),idempotency_key:crypto.randomUUID(),inputs,parameters:{}};
  }
  function newRun(engine='gpumd.md'){
@@ -1551,7 +1551,7 @@ export function App(){
     {props=><textarea {...props} className="json-input" value={runJson} onChange={e=>{setRunJson(e.target.value);setRunJsonError('');}}/>}
    </Field>
    {runDirty&&<div className="button-row"><Button variant="primary" onClick={applyRunJson}>{tr('应用 JSON')}</Button><span className="muted">{tr('存在未应用的 JSON 修改')}</span></div>}
-   <p className="muted">{tr("采样任务需 bias_file、structure_file、cv_size、cutoff 和 mode。输入复制到独立目录；检查结果单独记录，可在授权范围内提交。")}</p>
+   <p className="muted">{typeof runDraft.engine==='string'&&runDraft.engine.startsWith('hotham.')?tr('在 inputs 中填写本次 HotHam 作业的已授权源文件路径，包括脚本或配置引用的数据文件。'):tr("采样任务需 bias_file、structure_file、cv_size、cutoff 和 mode。输入复制到独立目录；检查结果单独记录，可在授权范围内提交。")}</p>
    <Button variant={runDirty?'secondary':'primary'} disabled={busy||runDirty}
     disabledReason={t(runDirty?'存在未应用的 JSON 修改':'正在创建输入快照…')}
     onClick={async()=>{setBusy(true);try{const r=await api('POST','/api/runs/prepare',{spec:runDraft});void openTask(r.id);setModal('');await refresh();}catch(e){onError(e);}finally{setBusy(false);}}}>

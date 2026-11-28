@@ -56,7 +56,7 @@ def source_listing(repositories):
     """Bounded selected-package membership identity, including future additions."""
     trees=[];total=0
     for name,item in sorted(repositories.items()):
-        folder={"pygas":"base","pydyn":"pydyn","hotpp":"hotpp"}.get(name)
+        folder={"pygas":"base","pydyn":"pydyn","hotpp":"hotpp","hotham":"hotham"}.get(name)
         if not folder or not isinstance(item,dict) or not isinstance(item.get("path"),str):continue
         root=Path(item["path"])/folder;files=[];real_root=root.resolve()
         if root.is_dir():
@@ -92,7 +92,7 @@ def watched_files(probe):
 
 def selected_sources(environment,engine,probe):
     """Keep source watches local to the imported SDK and native consumer."""
-    names=set(probe.get("modules",{})) & {"pygas","pydyn","hotpp"}
+    names=set(probe.get("modules",{})) & {"pygas","pydyn","hotpp","hotham"}
     if engine.startswith(("gpumd.","nep.")):names.add("gpumd")
     return {name:item for name,item in probe.get("repositories",{}).items()
             if name in names and isinstance(item,dict)}
@@ -117,7 +117,7 @@ def observed_guide(environment,engine,probe,observed_at=None):
     repositories={name:{key:item[key] for key in ("path","commit","dirty","status") if key in item} for name,item in selected_sources(environment,engine,probe).items()}
     for name,item in modules.items():
         root=environment.get("repositories",{}).get(name)
-        if root and item.get("file") and name in ("pygas","pydyn","hotpp"):
+        if root and item.get("file") and name in ("pygas","pydyn","hotpp","hotham"):
             matches=Path(item["file"]).resolve().is_relative_to(Path(root).resolve())
             item["registration_match"]=matches and item.get("registration_match") is not False
             if item["registration_match"] is False:item["status"]="blocked"

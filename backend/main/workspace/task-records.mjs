@@ -9,6 +9,7 @@ import {normalizeSteps,workflowMissing,setParameter,parameterValue,fieldPath} fr
 import {analyzeRoadmap,validateRoadmap} from "../../../contracts/workflows/roadmap.mjs";
 import {visibleUserText} from '../../../contracts/agent/user-message.mjs';
 import {bindWorkflowInputFields} from '../../../contracts/workflows/task-input-fields.mjs';
+import {engineContracts} from '../../../contracts/tools/engine-contracts.mjs';
 
 export function structuredResult(value){
  const found=[];function walk(v,depth=0){if(depth>8||v==null)return;if(typeof v==='string'){try{walk(JSON.parse(v),depth+1);}catch{}return;}if(Array.isArray(v)){for(const item of v)walk(item,depth+1);return;}if(typeof v!=='object')return;if(v.id&&(v.engine||Array.isArray(v.steps)||v.kind==='cluster-setup'||v.kind==='task-parameters'))found.push(v);for(const k of ['content','structuredContent','result','output','data','text'])if(k in v)walk(v[k],depth+1);}walk(value);return found;
@@ -73,7 +74,7 @@ export class TaskRecords{
   if(value.threadId&&!value.newWorkflow){const old=this.bound(value.provider,value.threadId);if(old)return old;}
   const conversation=value.threadId?this.conversation(value.provider,value.threadId):null;
   const task={id:randomUUID(),kind:'agent-task',planningMode:true,workflowVersion:value.workflowVersion===2?2:1,name:value.request.trim().slice(0,100),request:value.request,provider:value.provider,projectId:conversation?conversation.projectId??null:value.projectId||null,plan:[],steps:[],parameters:{},parameterRevision:0,manualEdits:{},review:{status:'not_run'},artifacts:[],phase:'collecting',updatedAt:Date.now()};
-  if(task.workflowVersion===2){task.parameters={engine:'',files:[]};task.steps=[{id:'inputs',title:'引擎与输入',fields:[{key:'engine',label:'计算引擎',type:'select',required:true,options:['gpumd.sampling','pydyn.sampling','gpumd.neb','gpumd.md','pydyn.md','pygas.build','bias.validate','nep.train','nep.eval','hotpp.train','hotpp.eval','hotpp.export','nep.analyze','pygas.reweight','pygas.opes-reweight']},{key:'files',label:'科学输入文件',type:'files',required:true}]}];}
+  if(task.workflowVersion===2){task.parameters={engine:'',files:[]};task.steps=[{id:'inputs',title:'引擎与输入',fields:[{key:'engine',label:'计算引擎',type:'select',required:true,options:Object.keys(engineContracts.engines)},{key:'files',label:'科学输入文件',type:'files',required:true}]}];}
   this.save(task,true);return value.threadId?this.attach(task.id,value.provider,value.threadId):task;
  }
  attach(id,provider,threadId){

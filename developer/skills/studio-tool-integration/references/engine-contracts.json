@@ -600,13 +600,79 @@
       "declaration_tokens": [
         "run.py"
       ]
+    },
+    "hotham.datasets": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "generate_dataset.py"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_driven_default": false,
+      "declaration_tokens": [
+        "generate_dataset.py"
+      ]
+    },
+    "hotham.train": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "hotham-input.yaml"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_driven_default": false,
+      "declaration_tokens": [
+        "hotham-input.yaml"
+      ]
+    },
+    "hotham.eval": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "hotham-input.yaml"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_driven_default": false,
+      "declaration_tokens": [
+        "hotham-input.yaml"
+      ]
+    },
+    "hotham.export": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "hotham-input.yaml"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_driven_default": false,
+      "declaration_tokens": [
+        "hotham-input.yaml"
+      ]
+    },
+    "hotham.diagonalize": {
+      "required_parameters": [],
+      "input_file_parameters": [],
+      "aliases": {},
+      "required_inputs": [
+        "diagonal.py"
+      ],
+      "aimlab_tool_id": "hotham",
+      "declaration_driven_default": false,
+      "declaration_tokens": [
+        "diagonal.py"
+      ]
     }
   },
   "aimlab_repository_keys": {
     "gpu-sampling": "gpumd",
     "pygas": "pygas",
     "pydyn": "pydyn",
-    "hotpp": "hotpp"
+    "hotpp": "hotpp",
+    "hotham": "hotham"
   },
   "aimlab_contract_note": "Neutral production contract distributed with the AIMatterLab tool-integration skill. Internal AimLab declarations bind to these engine rules; declaration files must not reference AIMatterLab repository source paths."
 }

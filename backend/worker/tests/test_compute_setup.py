@@ -17,6 +17,16 @@ class ComputeSetup(unittest.TestCase):
   self.receipt={'id':'local','identity':'snapshot','observed_at':time.time(),'entries':[self.item]};self.service.store.put('compute-discovery',self.receipt)
  def tearDown(self):
   self.service.close();self.service.store.db.close();self.tmp.cleanup()
+ def test_discovery_can_locate_an_explicit_hotham_source_without_registering_it(self):
+  sdk=self.root/'sdk';package=sdk/'hotham';package.mkdir(parents=True)
+  (package/'__init__.py').write_text('',encoding='utf-8')
+  self.service.store.put('source-project',{'id':'hotham','root':str(sdk)})
+  with patch('studio_worker.compute.compute_setup.candidates',return_value=[sys.executable]),patch('studio_worker.compute.compute_setup.native_paths',return_value={}):
+   result=discover(self.service,force=True)
+  item=result['entries'][0];self.assertEqual(item['status'],'discovered')
+  self.assertTrue(item['observation']['modules']['hotham']['available'])
+  self.assertEqual(item['spec']['repositories']['hotham'],str(sdk.resolve()))
+  self.assertFalse(self.service.store.list('environment'))
  def test_adopt_is_idempotent_and_never_changes_projects_or_jobs(self):
   first=adopt(self.service,{'identity':'snapshot','candidates':['candidate']});second=adopt(self.service,{'identity':'snapshot','candidates':['candidate']})
   self.assertEqual(first['environments'],second['environments']);self.assertEqual(len(self.service.store.list('environment')),1);self.assertFalse(self.service.store.list('project'));self.assertFalse(self.service.store.runs())

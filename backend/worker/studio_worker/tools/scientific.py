@@ -21,6 +21,8 @@ def probe_modules(engine):
         return ("torch", "cupy", "ase", "pygas", "pydyn", "hotpp")
     if engine.startswith("pydyn."):
         return ("torch", "cupy", "ase", "pydyn")
+    if engine.startswith("hotham."):
+        return ("torch", "ase", "hotham")
     if engine.startswith("hotpp."):
         return ("torch", "ase", "hotpp")
     if engine in ("gpumd.sampling", "pygas.build", "bias.validate") or engine.startswith("pygas."):
@@ -123,6 +125,15 @@ def dataset(payload):
             "structure_hashes": fingerprints, "scope": "label inventory; reference provenance must be supplied"}
 
 
+def hotham_mode(payload):
+    import yaml
+    with Path(payload["path"]).open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    if not isinstance(config, dict) or type(config.get("prediction")) is not int:
+        raise ValueError("hotham-input.yaml requires an integer prediction")
+    return {"prediction": config["prediction"]}
+
+
 def regression(payload):
     directory = Path(payload["path"])
     split = payload.get("split", "test")
@@ -156,7 +167,7 @@ if __name__ == "__main__":
     from studio_worker.tools.derivatives import check
     from studio_worker.tools.neb_checks import validate as neb_validate
     from studio_worker.tools.structure_tools import create, render, suggest
-    operations = {"suggest":suggest,"create_structure":create,"render_pygas":render,"neb":neb_validate,"derivatives":check, "probe": probe, "structure": structure, "dataset": dataset, "regression": regression}
+    operations = {"suggest":suggest,"create_structure":create,"render_pygas":render,"neb":neb_validate,"derivatives":check, "probe": probe, "structure": structure, "dataset": dataset, "regression": regression, "hotham-mode": hotham_mode}
     import faulthandler
     if sys.argv[1] == "probe":
         faulthandler.enable()

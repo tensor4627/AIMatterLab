@@ -2,12 +2,20 @@ import test from 'node:test';import assert from 'node:assert/strict';import {sel
 import {engineContracts} from '../../contracts/tools/engine-contracts.mjs';
 import skillMap from '../../agent/skills/scientific-skill-map.json' with {type:'json'};
 test('release tool lookup is available in ordinary chat and overrides the previous engine when requested',()=>{
- for(const text of ['查一下hotham','Hot-Ham 是什么？','How do I install Hot Ham?','验证 HotHam 的 LCAO 训练','查一下GPUMD','软件支持哪些科学工具？','TorchNEP 的安装手册在哪里？']){
+ for(const text of ['查一下hotham','Hot-Ham 是什么？','How do I install Hot Ham?','查一下GPUMD','软件支持哪些科学工具？','TorchNEP 的安装手册在哪里？']){
   assert.deepEqual(selectScientificFunctions({text,parameters:{engine:'gpumd.md'}}),['software.catalog'],text);
  }
  assert.deepEqual(selectScientificFunctions({text:'在集群上安装 HotHam'}),['cluster.resource-tools']);
  assert.deepEqual(selectScientificFunctions({text:'查一下GPUMD轨迹的原子数密度'}),['analysis.number-density']);
  assert.deepEqual(selectScientificFunctions({text:'查一下HotHam',manualFunction:'workflow.roadmap'}),['workflow.roadmap']);
+});
+test('HotHam operations select native authoring guidance in chat and when another engine was previously selected',()=>{
+ const guide=skillMap.functions.find(route=>route.id==='training.hotham');
+ assert.equal(guide.phase,'authoring');
+ for(const text of ['请用 HotHam 训练哈密顿量','验证 HotHam 的 LCAO 训练','Generate datasets with Hot-Ham','Evaluate Hot Ham on the held-out split','Export Hamiltonians with HotHam','用 HotHam 对角化求能带']){
+  assert.deepEqual(selectScientificFunctions({text}),[guide.id],text);
+  assert.deepEqual(selectScientificFunctions({text,hasWorkflow:true,parameters:{engine:'gpumd.md'}}),['workflow.orchestrate',guide.id],text);
+ }
 });
 test('tool lookup with setup or verification selects the software catalog',()=>{
  for(const text of [

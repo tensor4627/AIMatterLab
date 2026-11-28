@@ -1177,7 +1177,7 @@ print('__STUDIO_JSON__'+json.dumps(out))
         validate = """import sys,json,os
 from pathlib import Path
 sys.path.insert(0,str(Path('.studio').resolve()))
-from studio_worker.tools.adapters import Adapter
+from studio_worker.tools.adapters import Adapter, HOTHAM_PREDICTION_MODES
 from studio_worker.util import atomic_json,digest,contained
 r=json.load(open('.studio/run.json'))
 environment=r['environment_snapshot']
@@ -1212,6 +1212,13 @@ elif r['engine']=='pydyn.md':
   adapter=Adapter(r['engine'])
   required=adapter.pydyn_import_contract(environment,observed or adapter.probe(environment))
   atomic_json('execution-check.json',{'status':'passed','required':True,'report':required})
+ except Exception as e:
+  atomic_json('execution-check.json',{'status':'failed','required':True,'message':str(e)})
+  raise
+elif r['engine'] in HOTHAM_PREDICTION_MODES:
+ try:
+  mode=report or Adapter(r['engine']).hotham_mode_contract(environment,Path('simulation').resolve())
+  atomic_json('execution-check.json',{'status':'passed','required':True,'report':mode})
  except Exception as e:
   atomic_json('execution-check.json',{'status':'failed','required':True,'message':str(e)})
   raise

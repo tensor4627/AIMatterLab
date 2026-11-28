@@ -75,8 +75,17 @@ class DeclarationDrivenPrepare(unittest.TestCase):
             self.assertEqual(adapters.Adapter("hotpp.eval").prepare(self.spec, {"executables": self.environment["executables"], "repositories": {}}), baseline)
 
     def test_default_migration_set_covers_every_package_engine_and_preserves_studio_analysis(self):
-        from studio_worker.tools.engine_contracts import aimlab_tool_id
-        self.assertEqual(set(adapters.DEFAULT_DECLARATION_ENGINES), {e for e in adapters.ENGINES if aimlab_tool_id(e)})
+        from studio_worker.tools.engine_contracts import rule
+        expected = {engine for engine in adapters.ENGINES
+                    if rule(engine).get("aimlab_tool_id") and rule(engine).get("declaration_driven_default", True)}
+        self.assertEqual(set(adapters.DEFAULT_DECLARATION_ENGINES), expected)
+        # The pinned HotHam package uses its own operation IDs and port names.
+        # Ordinary preparation uses the Studio adapter even with a registered source.
+        with patch.dict(os.environ, {}, clear=True), patch(
+                "studio_worker.tools.declarations.find_declaration", side_effect=AssertionError("Unexpected declaration lookup")):
+            spec = {"inputs": {"hotham-input.yaml": "hotham-input.yaml"}, "parameters": {}}
+            command = adapters.Adapter("hotham.train").prepare(spec, self.environment)
+            self.assertEqual(command[-3:], ["-m", "hotham.entrypoints.main", "hotham-input.yaml"])
         for_studio = adapters.Adapter("trajectory.density").prepare({"inputs":{"trajectory.xyz":"/t/frames"}, "studio_workflow_binding":{"schema_version":2}},self.environment)
         self.assertEqual(for_studio,[sys.executable,"-I","density-analysis.py"])
         clean = {key: value for key, value in os.environ.items() if not key.startswith("STUDIO_DECLARATION")}

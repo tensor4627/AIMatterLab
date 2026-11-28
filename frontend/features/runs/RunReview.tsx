@@ -22,6 +22,7 @@ import {RunReviewDraft,reviewDraftIdentity,reviewDraftKey,reviewValues,type Draf
 const draftRestored='studio:run-review-draft-restored';
 
 export function taskModule(engine:string){
+ if(engine.startsWith('hotham.'))return t('机器学习哈密顿量');
  if(engine.endsWith('.sampling'))return t('增强采样');
  if(engine.startsWith('nep.'))return t('NEP');
  if(engine.startsWith('hotpp.'))return t('HotPP');

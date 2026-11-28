@@ -168,9 +168,9 @@
       {
         "source_id": "studio",
         "path": "contracts/tools/engine-contracts.json",
-        "sha256": "3863b2b78d98dae11843429b2c3c430747378e06d2b683910d43e09cef71ceff",
-        "bytes": 16176,
-        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "sha256": "74991af6a2d011e3198f2dc1c7664b570d8f740647da3f820c1d2121ceff3ede",
+        "bytes": 17826,
+        "observed_source": "development working tree, identified by whole-file SHA-256",
         "role": "registered_engine_contracts",
         "line_ranges": [
           [
@@ -179,7 +179,7 @@
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-19"
+        "observed_on": "2026-11-28"
       }
     ],
     "primary_references": [],

@@ -4,6 +4,7 @@ import {TaskRecords} from "../../agent/sessions/task-records.mjs";
 import {executeTask} from "../../backend/main/workspace/task-execution.mjs";
 import {normalizeSteps,workflowMissing,missingRequirements,setParameter} from "../../contracts/workflows/task-fields.mjs";
 import {explicitNewWorkflow} from "../../frontend/features/conversations/workflow-intent.mjs";
+import {engineContracts} from '../../contracts/tools/engine-contracts.mjs';
 
 function fixture(){
  const data=new Map(),events=[],catalog={get:(kind,id)=>structuredClone(data.get(kind+':'+id)),put:(kind,id,value)=>{data.set(kind+':'+id,structuredClone(value));return value;},list:kind=>[...data].filter(([key])=>key.startsWith(kind+':')).map(([,value])=>structuredClone(value))};
@@ -18,6 +19,12 @@ function artifact(records,id='run'){
 }
 function create(records){return records.create({planningMode:true,provider:'codex',threadId:'thread',projectId:'project',request:'MD'});}
 function reviewed(records){const task=create(records);records.prepareTurn('codex',{threadId:'thread',planningMode:true,studioTaskId:task.id});present(records,task);artifact(records);records.prepareTurn('codex',{threadId:'thread',studioTaskId:task.id,reviewMode:true});present(records,task);records.event({provider:'codex',method:'turn/completed',params:{threadId:'thread',turn:{status:'completed'}}});return records.read(task.id);}
+test('a new workflow offers each contracted engine before the agent presents steps',()=>{
+ const {records}=fixture();
+ const task=records.create({workflowVersion:2,planningMode:true,provider:'codex',request:'Prepare a HotHam run'});
+ const engine=records.read(task.id).steps[0].fields.find(field=>field.key==='engine');
+ assert.deepEqual(new Set(engine.options),new Set(Object.keys(engineContracts.engines)));
+});
 test('A conversation reuses its workflow across requests, restarts and chat; explicit new preserves old',()=>{
  const {records,catalog}=fixture(),first=create(records);assert.equal(create(records).id,first.id);
  const restored=new TaskRecords(catalog,()=>{});assert.equal(create(restored).id,first.id);

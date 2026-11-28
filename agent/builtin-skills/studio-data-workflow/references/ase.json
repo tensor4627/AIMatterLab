@@ -66,18 +66,18 @@
       {
         "source_id": "studio-worker",
         "path": "studio_worker/tools/scientific.py",
-        "sha256": "15a4bdca31b5f7c00daad6142779faed61ce4af501f5380b5a11afe6512f7953",
-        "bytes": 9041,
-        "observed_commit": "340ffd93435e2acbdc65a6851ad7c07f758b40fb",
+        "sha256": "fa660c6100301f6430f454269c4fd8b1620670886a258422f1d15f745a301b58",
+        "bytes": 9504,
+        "observed_source": "development working tree, identified by whole-file SHA-256",
         "role": "frame_and_label_inspection",
         "line_ranges": [
           [
-            100,
-            124
+            102,
+            126
           ]
         ],
         "read_scope": "Whole-file byte identity verified. Ranges locate supporting source; rule assertions remain limited to reviewed symbols, not a full source audit or runtime execution.",
-        "observed_on": "2026-11-19"
+        "observed_on": "2026-11-28"
       }
     ],
     "primary_references": [

@@ -226,7 +226,13 @@ test('Plan prompts retain human inputs, unavailable tools and the review gate wi
  assert.throws(()=>createPlan('unknown'));
 });
 
-test('Hamiltonian entry is discoverable but exposes no backend execution action',()=>{
- const entry=tools.find(tool=>tool.id==='hamiltonian');assert.equal(entry.name,'机器学习哈密顿量');assert.equal(entry.status,'planned');assert.deepEqual(entry.engines,[]);assert.equal(entry.page,entry.id);assert.match(entry.description,/后端待接入/);
+test('Hamiltonian task labels match each native draft engine',()=>{
+ const entry=tools.find(tool=>tool.id==='hamiltonian');
+ assert.equal(entry.status,'partial');
+ assert.equal(entry.engines.length,entry.capabilities.length);
+ assert.deepEqual(Object.fromEntries(entry.engines.map((engine,index)=>[engine,entry.capabilities[index]])),{
+  'hotham.datasets':'数据集生成','hotham.train':'模型训练','hotham.eval':'独立评估',
+  'hotham.export':'哈密顿量重构','hotham.diagonalize':'能带与 DOS',
+ });
 });
 });

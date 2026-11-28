@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createReleaseToolMatcher} from '../../contracts/tools/release-tool-sources.mjs';
 import {readReleaseToolSources} from './release-tool-catalog.mjs';
-const ENGINE_ROUTES={'trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
+const ENGINE_ROUTES={'hotham.datasets':'training.hotham','hotham.train':'training.hotham','hotham.eval':'training.hotham','hotham.export':'training.hotham','hotham.diagonalize':'training.hotham','trajectory.density':'analysis.number-density','pydyn.md':'md.pydyn','gpumd.md':'md.gpumd','pydyn.sampling':'sampling.pydyn','gpumd.sampling':'sampling.gpumd','gpumd.neb':'neb.gpumd','pygas.build':'pygas.bias','bias.validate':'pygas.contract','nep.train':'training.nep','nep.eval':'training.nep','nep.analyze':'training.nep','hotpp.train':'training.hotpp','hotpp.eval':'training.hotpp','hotpp.export':'training.hotpp','pygas.reweight':'analysis.wtmetad','pygas.opes-reweight':'analysis.opes'};
 let fallbackReleaseToolMatcher;
 function defaultReleaseToolMatcher(){
  if(!fallbackReleaseToolMatcher){
@@ -58,6 +58,8 @@ export function selectScientificFunctions({text='',parameters={},hasWorkflow=fal
  else if(requestsToolOnboarding(value))id='tool.onboarding';
  else if(/list_resource_tools|plan_resource_tool_setup|discover_resource_tool_scripts|(?:安装|配置|接入|复用|登记).{0,12}(?:集群工具|新工具|已有脚本|第三方软件|自定义工具|工具环境)|(?:工具|软件).{0,10}(?:接入|最小测试)|(?:set up|configure|install|adopt|onboard).{0,20}(?:cluster tool|resource tool|third.party software|existing scripts?)/i.test(value))id='cluster.resource-tools';
  else if(requestsSoftwareCatalog(value,releaseTool))id='software.catalog';
+ else if(releaseTool?.source?.id==='hotham'&&releaseTool.source.integration_status==='native_adapter'&&
+  /训练|评估|预测|推断|推理|导出|对角化|数据集|哈密顿量|能带|\b(?:train(?:ing)?|eval(?:uate|uation)?|predict(?:ion)?|infer(?:ence)?|export|diagonali[sz](?:e|ation)|datasets?|hamiltonians?|bands?)\b/i.test(value))id='training.hotham';
  else if(/(?:基础|默认|初始化|设置|选择|创建).*工作区|工作区.*(?:灰|设置|配置|不可用)|(?:base|default|setup|initialize).*workspace/i.test(value))id='cluster.workspace-setup';
  else if(/(?:reweight|重加权)/i.test(value))id=/opes/i.test(value)?'analysis.opes':'analysis.wtmetad';
  else if(/trajectory\.density|(?:轨迹|trajectory|frames?).*(?:原子数密度|number density)|(?:原子数密度|number density).*(?:轨迹|trajectory|frames?)/i.test(value))id='analysis.number-density';

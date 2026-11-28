@@ -369,6 +369,11 @@ const english:Record<string,string> = {
 "新手引导":"Setup guide","返回新手引导":"Return to setup","引导进度未保存，请重试。":"Setup progress could not be saved. Try again.","设置未保存，请重试。":"Settings could not be saved. Try again.",
 "入口已提供；计算后端待接入，当前仅展示流程范围。":"This entry shows the workflow scope. The compute backend is pending.",
 "机器学习哈密顿量":"Machine Learning Hamiltonian",
+"HotHam · 从 DFT 数据生成训练集，训练和评估模型，导出哈密顿量并计算能带与 DOS。":"HotHam · Prepare datasets from DFT outputs, train and evaluate models, export Hamiltonians and compute bands and DOS.",
+"在任务草稿中选择输入文件。训练、评估、重构的 prediction 分别为 0、1、2。":"Select input files in the run draft. Set prediction to 0 for training, 1 for evaluation or 2 for export.",
+"连接作业服务并打开项目后即可准备 HotHam 任务。":"Connect the worker and open a project to prepare a HotHam run.",
+"能带与 DOS":"Bands and DOS",
+"在 inputs 中填写本次 HotHam 作业的已授权源文件路径，包括脚本或配置引用的数据文件。":"In inputs, enter the authorized source paths for this HotHam job, including data files referenced by the script or configuration.",
 "随版本收录 HotHam 源码和交付指南。原生计算后端待接入，资源侧安装与测试以目标回执为准。":"This release lists HotHam source and delivery guidance. Native execution support is planned. Check the selected resource for its installation and test receipts.",
 "数据准备":"Data preparation","模型训练":"Model training","独立评估":"Independent evaluation","哈密顿量重构":"Hamiltonian reconstruction","能带分析":"Band analysis","HotHam 源码与指南":"HotHam source and guide",
 

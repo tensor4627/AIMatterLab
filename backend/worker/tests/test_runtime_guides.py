@@ -44,6 +44,25 @@ class RuntimeGuideTests(unittest.TestCase):
 
 class RuntimeGuideScopeTests(unittest.TestCase):
  setUp=RuntimeGuideTests.setUp
+ def test_hotham_receipt_reaches_agent_with_source_identity_and_stales_on_change(self):
+  from studio_worker.transport.runtime_projection import result_for_agent
+  sdk=self.root/'sdk';package=sdk/'hotham';package.mkdir(parents=True)
+  init=package/'__init__.py';init.write_text('',encoding='utf-8')
+  kernel=package/'kernel.py';kernel.write_text('value=1',encoding='utf-8')
+  self.environment['repositories']={'hotham':str(sdk)}
+  self.probe.update(scope={'engine':'hotham.train'},native_runtime={'status':'not_run'},
+                    modules={'hotham':{'file':str(init),'status':'passed'},'future-module':{'file':str(init),'status':'passed'}},
+                    repositories={'hotham':{'path':str(sdk),'status':'passed','commit':'1'*40}})
+  self.guides.record(self.environment,'hotham.train',self.probe)
+  raw=self.guides.read(self.environment,'hotham.train');args={'engine':'hotham.train','environment_id':self.environment['id']}
+  view=result_for_agent('read_runtime_guide',raw,args)
+  self.assertEqual(view['status'],'observed')
+  modules=view['facts']['modules'];self.assertTrue(modules['hotham']['registration_match'])
+  self.assertNotIn('file',modules['hotham']);self.assertTrue(modules['hotham']['file_identity']['redacted'])
+  self.assertNotIn('future-module',modules);repo=view['facts']['repositories']['hotham']
+  self.assertEqual(repo['commit'],'1'*40);self.assertNotIn('path',repo);self.assertTrue(repo['path_identity']['redacted'])
+  kernel.write_text('value=2',encoding='utf-8')
+  self.assertEqual(self.guides.read(self.environment,'hotham.train')['status'],'stale')
  def test_different_actual_interpreter_never_becomes_observed(self):
   other=self.root/'other-python';other.write_text('different');self.probe['executable']=str(other)
   self.assertEqual(self.guides.record(self.environment,'gpumd.sampling',self.probe)['state'],'blocked')

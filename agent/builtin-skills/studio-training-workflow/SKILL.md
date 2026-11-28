@@ -7,7 +7,7 @@ description: Prepare NEP or HotPP training, independent evaluation and model exp
 
 For a registered external trainer, use the exact activated function and environment. If the user asks to configure its hosted target, use `cluster.resource-tools`.
 
-HotPP fits interatomic potentials for atomistic simulation. For HotHam or Hot-Ham, which learns electronic Hamiltonians, use `software.catalog` and its focused HotHam reference.
+HotPP fits interatomic potentials for atomistic simulation. For HotHam electronic Hamiltonians use `training.hotham` and its focused reference for dataset preparation, training, evaluation, matrix export and diagonalization. Use `software.catalog` for upstream source and installation questions.
 
 Use `describe_engine` for `nep.train`, `nep.eval`, `nep.analyze`, `hotpp.train`, `hotpp.eval` or `hotpp.export`. For a requested run reuse the current registered environment and check the selected route. `training.torchnep`, `learning.nepmaker` and `learning.activemiao` provide planning references. Their source or CLI guidance can inform a draft. The built-in worker has no corresponding training or orchestration adapter.
 

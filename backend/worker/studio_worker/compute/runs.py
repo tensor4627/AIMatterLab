@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, SCIENTIFIC, process_env
+from studio_worker.tools.adapters import Adapter, ENGINES, SUPPORTED_ENGINES, HOTHAM_PREDICTION_MODES, SCIENTIFIC, process_env
 from studio_worker.infrastructure.store import Store
 from studio_worker.compute.runtime_service import RuntimeServiceMixin
 from studio_worker.compute.run_rejection import run_preflight
@@ -281,7 +281,8 @@ class RunsMixin:
                 Adapter(run["engine"]).input_contract(run, Path(run["directory"]) / "simulation")
             # Scientific/parameter findings do not grant permission and do not
             # revoke it. Serialized bias compatibility remains mandatory.
-            required = run["engine"].endswith("sampling") or run["engine"] in ("bias.validate", "pydyn.md")
+            required = (run["engine"].endswith("sampling") or run["engine"] in ("bias.validate", "pydyn.md")
+                        or run["engine"] in HOTHAM_PREDICTION_MODES)
         check = {"status":"not_run", "required":False, "scope":"No serialized bias artifact for this engine"}
         if required:
             try:
@@ -289,6 +290,8 @@ class RunsMixin:
                 if run["engine"] == "pydyn.md":
                     observed = adapter.probe(run["environment_snapshot"])
                     report = {**adapter.pydyn_import_contract(run["environment_snapshot"], observed), "provenance":observed}
+                elif run["engine"] in HOTHAM_PREDICTION_MODES:
+                    report = adapter.hotham_mode_contract(run["environment_snapshot"], Path(run["directory"]) / "results")
                 else:
                     report = adapter.validate(run, run["environment_snapshot"],
                         Path(run["directory"]) / "results", execution_only=True)

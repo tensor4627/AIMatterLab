@@ -117,8 +117,8 @@ class ProjectionTests(unittest.TestCase):
         f['modules'] = {n: {'file': '/public/.codex/worktrees/' + n + '.py'} for n in projection.KNOWN_MODULES}
         v = projection.guide_for_agent(receipt(f), ARGS)
         self.assertNotIn('.codex', json.dumps(v))
-        self.assertEqual(len(v['facts']['modules']), 6)
-        self.assertEqual(len(v['facts']['repositories']), 5)
+        self.assertEqual(set(v['facts']['modules']), projection.KNOWN_MODULES)
+        self.assertEqual(set(v['facts']['repositories']), projection.KNOWN_SOFTWARE)
 
     def test_none_module_and_sampling_origin_are_unavailable_not_error(self):
         f = fixture()['facts']
