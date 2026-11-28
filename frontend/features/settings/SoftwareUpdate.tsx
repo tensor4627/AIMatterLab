@@ -134,5 +134,9 @@ export function SoftwareUpdate({state,act}:ReturnType<typeof useWorkspaceUpdate>
     {check&&phase!=='error'&&checkButton}
     {available&&<Button variant="primary" onClick={()=>void act('updates.run')}><Download size={15} aria-hidden="true"/>{t(phase==='ready'?'重启更新':'下载并重启安装')}</Button>}
     {(check||phase==='available')&&!state.automatic&&<ReleaseAccess recheck={()=>act('updates.check')}/>}
+    {state.announcement&&<Disclosure className="release-access" summary={t('当前版本更新公告')+' · '+state.announcement.version}>
+      {state.announcement.changes.length?<ul>{state.announcement.changes.map((change,index)=><li key={index}>{change}</li>)}</ul>:
+       <p>{t('暂无此版本的更新公告。')}</p>}
+    </Disclosure>}
   </section>;
 }

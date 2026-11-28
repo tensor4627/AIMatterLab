@@ -5,9 +5,11 @@ import {installManagedTray} from './platform/managed-tray.mjs';
 import {loadRecoverableWorkbench} from './platform/workbench-recovery.mjs';
 import {createConversationActivity} from '../backend/main/compute/conversation-activity.mjs';
 import {managedProjectAccess} from '../backend/main/compute/managed-project-access.mjs';
+import {createUserPermissions} from '../backend/main/compute/user-permissions.mjs';
 import {agentApprovalMode,developerComputeAccess} from '../backend/main/compute/developer-compute-access.mjs';
 import {installDesktopShutdown} from './platform/desktop-shutdown.mjs';
 import {createWorkspaceUpdater,launchWorkspaceUpdate} from './platform/workspace-updater.mjs';
+import {announceUpdateOnce,installerCompletedInAppUpdate,updateAnnouncement} from './platform/update-announcement.mjs';
 import {acknowledgeLayeredStartup,createLayeredWorkspaceUpdate} from './platform/layered-update.mjs';
 import {startupArgument as layeredStartupArgument} from './platform/app-update-helper.mjs';
 import {createUpdateAccess,validateUpdateSource} from './platform/update-feeds.mjs';
@@ -183,7 +185,10 @@ const agentConnectAttempts=new Map();
 const updateAccess=createUpdateAccess(new CredentialVault(path.join(app.getPath('userData'),'update-access'),safeStorage,validateUpdateSource));
 const updateWorkspace=process.platform==='win32'&&process.arch==='x64'?workspace:null;
 const layered=updateWorkspace?createLayeredWorkspaceUpdate({workspace:updateWorkspace,currentVersion:app.getVersion()}):null;
-const updater=createWorkspaceUpdater({workspace:updateWorkspace,layered,currentVersion:app.getVersion(),
+let changelog='';
+try{changelog=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8');}catch(error){if(error.code!=='ENOENT')console.warn('Unable to read the installed update announcement:',error.message);}
+const releaseAnnouncement=updateAnnouncement(app.getVersion(),changelog);
+const updater=createWorkspaceUpdater({workspace:updateWorkspace,layered,currentVersion:app.getVersion(),announcement:releaseAnnouncement,
   fetchApi:(url,options)=>electronUpdateFetch(net,url,{...options,version:app.getVersion()}),tokenFor:updateAccess.token,install:launchWorkspaceUpdate,quit:()=>app.quit(),
   publish:params=>emit('studio:event',{method:'studio/update',params})});
 let scientificSkills,privateAccess,customCv,workflowContext,localReview,sharedTerminal,terminalMcp,computeResource,sshService,conversationTerminals;
@@ -244,6 +249,8 @@ performanceTimeline.mark('desktop-initialize');
 const profileDirectory=app.getPath('userData'),catalogRoot=path.join(profileDirectory,'studio');
 const existingProfile=fs.existsSync(path.join(catalogRoot,'catalog.sqlite'));
 catalog = new Catalog(catalogRoot);
+const userPermissions=createUserPermissions({catalog,desktopRoot:app.isPackaged?path.dirname(process.execPath):root,
+ changed:params=>emit('studio:event',{method:'studio/conversationApprovalChanged',params})});
 const chatAttachments=createChatAttachments({catalog,deleted:(provider,threadId)=>taskRecords.deleted(provider,threadId)});
 handle('agent.attachments.import',value=>chatAttachments.stage(value));
 handle('agent.attachments.preview',value=>chatAttachments.preview(value));
@@ -291,6 +298,7 @@ if(projectSkills.overlapsBundle(projectSkills.root)){
  }catch{console.warn('Existing skill cache retained. Choose a directory separate from built-in skills in Settings.');}
 }
 agents=new ConversationAgentHub({authCodex:codex,createCodex,initialProvider:settings.agentProvider||'codex',
+ recordOperationApproval:userPermissions.record,
  runSession:(identity,run)=>workflowContext.runInSession(identity,run),dropSession:id=>{resourceRouting.releaseSession(id);workflowContext?.dropSession(id);},instructions:workspaceAgentInstructions(workspace,projectSkills.personalDirectory),resolveCli:provider=>cliRuntimes.resolve(provider),fetchApi:(...args)=>net.fetch(...args),root:path.join(app.getPath('userData'),'agents'),catalog,vault:new CredentialVault(path.join(app.getPath('userData'),'credentials'),safeStorage),settings:()=>settings,
  bindResourceQuestion:(scope,question)=>{
   const checkCurrent=()=>workflowContext.sessionScopeCurrent(scope);
@@ -304,11 +312,19 @@ scientificSkills=new ScientificSkills({providerConsent:provider=>!['qwen','compa
 const proposalTool={name:'propose_custom_cv',description:'Only after inspecting actual pyGAS library classes and discussing a missing/non-equivalent definition: save a typed formula/values/library_review private draft in this current conversation. It generates no code and grants no approval, sharing or execution. Human formula/code reviews and one exact CPU confirmation are separate. Prefer the real library and official examples first.',annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},inputSchema:JSON.parse(fs.readFileSync(path.join(root,'agent','tools','custom-cv-tool-schema.json'),'utf8'))};
 const privateReader={name:'read_custom_cv',description:'Read only the active conversation private CV after the human explicitly enables sharing with this provider. Never reads other library entries, approves or executes.',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{workspace_id:{type:'string'}},required:['workspace_id'],additionalProperties:false}};
 const readEnvironmentApi=createEnvironmentApiReader({worker,current:scope=>workflowContext.assertScope(scope)});
-const workflowInputSources=createWorkflowInputSources({worker,current:scope=>workflowContext.assertScope(scope),userRequest:scope=>taskRecords.currentInputRequest(scope),protectedRoots:[app.getPath('userData')]});
-worker.setScopedTools([...softwareDocDefinitions,...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool,...workflowInputSourceTools,baseWorkspaceTool],async(name,args,scope)=>{
+const workflowInputSources=createWorkflowInputSources({worker,current:scope=>workflowContext.assertScope(scope),userRequest:scope=>taskRecords.currentInputRequest(scope),
+ permissions:userPermissions,protectedRoots:[app.getPath('userData')],
+ requestApproval:(scope,operation,details,options)=>{
+  const en=settings.language==='en';
+  const message=operation==='list'?(en?'Allow this conversation to list inputs in this desktop directory?':'允许本会话在此桌面目录查找输入？'):
+   (en?'Allow this conversation to read this desktop file for the workflow?':'允许本会话读取此桌面文件作为流程输入？');
+  return agents.requestOperationApproval(agents.captureToolScope(scope),{message,details:{resource:en?'Windows desktop':'Windows 桌面',...details},
+   desktopRead:{action:operation,file:details.directory||details.source}},options);
+ }});
+worker.setScopedTools([...softwareDocDefinitions,...scientificSkills.tools(),currentPairTool,proposalTool,privateReader,environmentApiTool,copyProjectInputsTool,...workflowInputSourceTools,baseWorkspaceTool],async(name,args,scope,options)=>{
  if(name==='setup_base_workspace')return baseWorkspace.call(args,scope);
  if(name==='copy_project_inputs')return copyProjectInputs({worker,current:value=>workflowContext.assertScope(value)},args,scope);
- if(workflowInputSourceTools.some(tool=>tool.name===name))return workflowInputSources(name,args,scope);
+ if(workflowInputSourceTools.some(tool=>tool.name===name))return workflowInputSources(name,args,scope,options);
  if(name==='inspect_environment_api')return readEnvironmentApi(args,scope);
  if(['read_pygas_workflow','propose_custom_cv','read_custom_cv'].includes(name))workflowContext.assertScope(scope);
  if(name==='read_pygas_workflow'){const result=await readCurrentPair({records:taskRecords,worker,activeTasks:activeAuthoringTasks,readTaskPygas,privateAccess:(task,provider)=>privateAccess.assertTask(task,provider)},args,scope);workflowContext.assertScope(scope);return result;}
@@ -517,7 +533,7 @@ for(const method of ['read','preview','confirm','cancel'])handle('compute.resour
 handle('compute.resourceWorkspace.session',value=>resourceWorkspace.forSession(value));
  const developerCompute=developerComputeAccess({workspaceId:()=>settings.developerComputeWorkspaceId,mode:()=>agentApprovalMode(settings),
   userTurn:scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'&&agents.isBusy(scope.provider,scope.threadId)});
-const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,developerCompute,catalog,
+const workspaceTerminalAuthorization=createWorkspaceTerminalAuthorization({workspace:resourceWorkspace,connections:sharedTerminal.connections,developerCompute,permissions:userPermissions,catalog,
  current:()=>{const selected=workflowContext.selectedOwner();return {...selected.context,revision:selected.revision+':'+computeResource.revision()};},
  emit:()=>emit('studio:event',{method:'studio/terminalApprovalChanged'})});
 for(const method of ['pending','decide'])handle('compute.terminalApproval.'+method,value=>workspaceTerminalAuthorization[method](value));
@@ -564,6 +580,7 @@ worker.setProjectSkills(projectSkills);
 const runToolScope=(scope,run)=>agents.runForScope(scope,()=>workflowContext.runForScope(scope,run));
 worker.setToolScope(runToolScope);
 managedWorkbench=createManagedWorkbench({catalog,profiles:computeProfiles,registration:serviceRegistration,terminal:sharedTerminal,projectSkills,resourceActivity,
+ english:()=>settings.language==='en',
  resourceChoiceTitle:()=>settings.language==='en'?'Choose a compute resource for this task':'选择本次操作的计算资源',
  resourceWorkspace,terminalAuthorization:workspaceTerminalAuthorization,developerCompute,
  onConnectionLost:connectionId=>{workspaceTerminalAuthorization.revokeConnection(connectionId);sshService.connectionLost(connectionId);},
@@ -594,7 +611,13 @@ managedResources=managedWorkbench.resources;managedSchedules=managedWorkbench.sc
 try{computeResource.clearLegacyTerminal?.();}catch{}
 void managedResources.restorePublished();
 const resourceToolSetups=createResourceToolController({
- resources:managedResources,workspaces:resourceWorkspace,skills:projectSkills,developerCompute,current:()=>workflowContext.revision(),
+ resources:managedResources,workspaces:resourceWorkspace,skills:projectSkills,developerCompute,permissions:userPermissions,current:()=>workflowContext.revision(),
+ requestApproval:(scope,operation,details,options)=>{
+  const en=settings.language==='en';
+  const message=operation==='discover'?(en?'Inspect scripts in this directory on the selected resource?':'允许查看所选计算资源上这个目录里的脚本？'):
+   (en?'Save this tool setup as a draft for review?':'允许保存这份工具配置草稿供复核？');
+  return agents.requestOperationApproval(scope,{message,details},options);
+ },
  resolveSelectedDefinition:(ref,scope)=>scientificSkills.selectedManaged.resolveDefinition(ref,scope),
  emit:params=>emit('studio:event',{method:'studio/resourceToolSetupChanged',params}),
  chooseFile:async (event,kind)=>{
@@ -632,7 +655,7 @@ const desktopAgentTools={
  owns:name=>name===conversationTitleTool.name||managedWorkbench.desktopTools.owns(name)||resourceToolSetups.owns(name),
  call:(name,args,scope,options)=>{
   if(name===conversationTitleTool.name)return titleReviews.propose(args,scope);
-  return resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope):managedWorkbench.desktopTools.call(name,args,scope,options);
+  return resourceToolSetups.owns(name)?resourceToolSetups.call(name,args,scope,options):managedWorkbench.desktopTools.call(name,args,scope,options);
  },
 };
 const conversationDraft=createConversationDraftTool({records:taskRecords,assertScope:scope=>workflowContext.assertScope(scope)});
@@ -670,8 +693,21 @@ registerWorkspaceTaskRoutes({
  chooseFile:async()=>{const value=await dialog.showOpenDialog(window,{properties:['openFile']});return value.canceled?null:value.filePaths[0];},
 });
 handle('conversation.delete',({id})=>{const prior=catalog.get('conversation',id);if(prior&&(agents.isBusy(prior.provider,prior.threadId)||followUpQueue?.isBusy?.(prior.provider,prior.threadId)))throw Error('Stop this conversation before deleting it');
- const result=taskRecords.remove(id);const clearedForeground=workflowContext.forget(result.provider,result.threadId);chatAttachments.removeThread(result.provider,result.threadId);chatEvidence.remove(result.provider,result.threadId);conversationHistory.forget(id);chatActivity.forget(result.provider,result.threadId);titleReviews.forget(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);workspaceTerminalAuthorization.forget(result.provider,result.threadId);resourceToolSetups.forget(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);if(clearedForeground){sharedTerminal?.reconcileContext?.();sshService?.reconcileContext?.();emit('studio:event',{method:'studio/conversationTerminalChanged'});emit('studio:event',{method:'studio/computeResourceChanged'});}return result;});
+ const result=taskRecords.remove(id);const clearedForeground=workflowContext.forget(result.provider,result.threadId);chatAttachments.removeThread(result.provider,result.threadId);chatEvidence.remove(result.provider,result.threadId);conversationHistory.forget(id);chatActivity.forget(result.provider,result.threadId);titleReviews.forget(id);conversationTerminals.forget(result.provider,result.threadId);managedResources?.forget?.(result.provider,result.threadId);workspaceTerminalAuthorization.forget(result.provider,result.threadId);resourceToolSetups.forget(result.provider,result.threadId);resourceActivity.forget(result.provider,result.threadId);userPermissions.clear(result);agents.forget(result.provider,result.threadId);scientificSkills.context.forget(result.id);if(clearedForeground){sharedTerminal?.reconcileContext?.();sshService?.reconcileContext?.();emit('studio:event',{method:'studio/conversationTerminalChanged'});emit('studio:event',{method:'studio/computeResourceChanged'});}return result;});
 handle('conversation.list',()=>taskRecords.conversations());
+function conversationApprovalOwner(value,keys){
+ const selected=workflowContext.selectedOwner().context;
+ if(Object.keys(value).sort().join(',')!==keys||!value.threadId||value.provider!==selected?.provider||value.threadId!==selected?.threadId)
+  throw Error('Select the conversation that owns these approvals.');
+ return selected;
+}
+handle('conversation.approvals',value=>userPermissions.list(conversationApprovalOwner(value,'provider,threadId')));
+handle('conversation.revokeApproval',value=>{
+ const scope=conversationApprovalOwner(value,'id,provider,threadId');
+ if(typeof value.id!=='string'||value.id.length>100)throw Error('Invalid approval identity');
+ userPermissions.revoke(scope,value.id);
+ return userPermissions.list(scope);
+});
 handle('conversation.activity.list',value=>{if(Object.keys(value).length)throw Error('Invalid conversation activity request');return chatActivity.snapshot();});
 handle('conversation.activity.markRead',value=>chatActivity.markRead(value));
 handle('conversation.remember',value=>taskRecords.remember(value));
@@ -1039,7 +1075,15 @@ const loaded=await loadRecoverableWorkbench({
 });
 if(!loaded||shuttingDown)return;
 performanceTimeline.mark('window-loaded');
-await acknowledgeLayeredStartup(workspace,app.getVersion(),window.webContents);
+const updatedApplication=await acknowledgeLayeredStartup(workspace,app.getVersion(),window.webContents);
+if(updatedApplication||await installerCompletedInAppUpdate(updateWorkspace,app.getVersion()).catch(()=>false)){
+ const en=settings.language==='en';
+ announceUpdateOnce(catalog,releaseAnnouncement,({version,changes})=>{
+  void dialog.showMessageBox(window,{type:'info',title:en?'Update announcement':'更新公告',
+   message:en?`AIMatterLab ${version} is installed`:`AIMatterLab 已更新到 ${version}`,
+   detail:changes.map(change=>'• '+change).join('\n'),buttons:[en?'Done':'完成']}).catch(()=>{});
+ });
+}
 if(verifying){const errors=[];window.webContents.on('console-message',(...args)=>{const {level,message}=consoleMessage(args);if(level===3)errors.push(message);});const {verifyDesktop}=await import(installationVerifying?'./platform/verification/install-verification.mjs':improvementsVerifying?'./platform/verification/improvements-verification.mjs':providerVerifying?'./platform/verification/provider-verification.mjs':'./platform/verification/verification.mjs');const ok=await verifyDesktop(window,verificationRoot,errors,{publish:event=>emit('studio:event',event),packaged:app.isPackaged,version:app.getVersion(),taskAttach:(...args)=>taskRecords.attach(...args),taskEvent:event=>taskRecords.event(event),agentPaths:{kimi:settings.kimiPath,qwen:settings.qwenPath}});await desktopShutdown.run();app.exit(ok?0:1);}else window.show();
 app.on('window-all-closed',()=>app.quit());
 if(workspace){const timer=setTimeout(()=>{if(!shuttingDown&&updater.snapshot().phase==='idle')void updater.check();},4000);timer.unref();}

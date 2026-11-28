@@ -73,9 +73,14 @@ async prepareToolProxy(connection){
     const scopedTool=(this.scopedDefinitions||[]).some(t=>t.name===body?.params?.name);
     const localCall=async handler=>{
      fresh();
-     const value=await handler(body.params.name,body.params.arguments||{},scope);
-     dispatched=true;
-     return toolValueResult(value);
+     const controller=new AbortController(),close=()=>controller.abort();
+     res.once('close',close);
+     try{
+      if(res.destroyed)close();
+      const value=await handler(body.params.name,body.params.arguments||{},scope,{signal:controller.signal});
+      dispatched=true;
+      return toolValueResult(value);
+     }finally{res.off('close',close);}
     };
     const failure=e=>body.params.name==='inspect_environment_api'?toolValueResult(environmentApiFailure(e,{dispatched})):toolFailure(e,{dispatched,toolName:body.params.name});
     if(body?.method==='tools/call'&&projectSkill){response={status:200,data:{jsonrpc:'2.0',id:body.id,result:await localCall(this.projectSkills.call.bind(this.projectSkills))}};}else if(independent&&['initialize','ping','resources/list','resources/templates/list'].includes(body?.method)){

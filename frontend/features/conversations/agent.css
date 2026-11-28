@@ -1415,3 +1415,6 @@
     color: var(--on-accent);
   }
 }
+.conversation-approval-list { display: grid; gap: 0.65rem; padding-inline-start: 1.2rem; }
+.conversation-approval-list li > :is(strong, small, code) { display: block; overflow-wrap: anywhere; }
+.conversation-approval-list li > button { margin-top: 0.3rem; }

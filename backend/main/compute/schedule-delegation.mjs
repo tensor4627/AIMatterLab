@@ -98,17 +98,20 @@ function schedulePurposes(text) {
 }
 
 export function createScheduleDelegations(catalog) {
+  const turns=new Map();
+  const purposeFor=(operation,args)=>operation==='stop'?'stop':args.kind==='action'?{status:'poll',read_log:'action'}[args.action?.type]:args.kind;
   function record({provider,threadId,projectId,taskId,text,turnId}) {
     if(!threadId||typeof text!=='string'||!text.trim())return;
     const key=keyOf(provider,threadId);
     const {allowed,removed}=schedulePurposes(text);
+    const humanTurn=turnId||randomUUID();
+    turns.set(key,{projectId,taskId,turnId:humanTurn,removed});
     const existing=catalog.get(namespace,key);
     const prior=existing&&sameScope(existing,{projectId,taskId})?existing:null;
     // Old records came from keyword matches and have no evidence for an individual purpose.
     const permissions=new Set((prior?.permissions||[]).filter(purpose=>evidencedTurn(prior,purpose)));
     const added=[...allowed].filter(purpose=>!removed.has(purpose));
     if(!added.length&&![...removed].some(purpose=>permissions.has(purpose)))return;
-    const humanTurn=turnId||randomUUID();
     for(const purpose of added)permissions.add(purpose);
     for(const purpose of removed)permissions.delete(purpose);
     const permissionTurns=Object.fromEntries([...permissions].map(purpose=>[
@@ -120,14 +123,17 @@ export function createScheduleDelegations(catalog) {
   }
   function assert(scope,operation,args) {
     const key=keyOf(scope.provider,scope.threadId),grant=catalog.get(namespace,key);
-    const purposes={status:'poll',read_log:'action'};
-    const purpose=operation==='stop'?'stop':args.kind==='action'?purposes[args.action?.type]:args.kind;
+    const purpose=purposeFor(operation,args);
     const turn=evidencedTurn(grant,purpose);
     if(!scope.threadId||!scope.projectId||!turn||!sameScope(grant,scope))throw Error('managed_schedule_task_delegation_required');
     if(!grant.taskId||!grant.projectId)catalog.put(namespace,key,{...grant,taskId:scope.taskId,projectId:scope.projectId});
     return turn;
   }
-  return {record,assert};
+  function confirmationTurn(scope,operation,args){
+    const row=turns.get(keyOf(scope.provider,scope.threadId)),purpose=purposeFor(operation,args);
+    if(purpose&&scope.projectId&&row&&sameScope(row,scope)&&!row.removed.has(purpose))return row.turnId;
+  }
+  return {record,assert,confirmationTurn};
 }
 
 const runCommands={
@@ -176,6 +182,14 @@ function requestsFreshRun(text) {
     /^(?:一个|一次|一项|一条|一份|另一个|另一次|新的?|独立)\s*\S/u.test(object);
 }
 
+function forbidsRunAction(row,operation,{confirmation=false}={}){
+  if(operation==='submit'&&(confirmation?row.submitForbidden:row.submitDenied))return true;
+  return row.clauses.some(part=>{
+    const negative=restriction.exec(part);
+    return negative&&!(confirmation&&operation==='submit'&&humanHold.test(part))&&runCommand(part.slice(negative[0].length),operation);
+  });
+}
+
 function mentionsRun(text,id) {
   const token=/[A-Za-z0-9_.:+@~/-]/u;
   for(let index=text.indexOf(id);index>=0;index=text.indexOf(id,index+1)){
@@ -222,9 +236,10 @@ export function createRunActionIntents() {
       .flatMap(part=>part.split(/\bbut\b|但是|但|(?:[，,]|\band\b|并且?|同时)(?=\s*(?:不要|先别|不再|请勿|do not|don['’]t|never|show me|tell me|report\b|check\b|read\b|查看|告诉我|报告|检查|读取))/iu))
       .map(commandText).filter(part=>!discussion.test(part));
     const submit=clauses.filter(part=>runCommand(part,'submit'));
-    const submitDenied=parts.some(part=>noRun.test(part)||humanHold.test(part)||draftOnly.test(commandText(part)));
+    const submitForbidden=parts.some(part=>draftOnly.test(commandText(part))||noRun.test(part)&&!humanHold.test(part));
+    const submitDenied=submitForbidden||parts.some(part=>humanHold.test(part));
     // Keep the current human instruction and at most one exact new draft in memory.
-    turns.set(keyOf(provider,threadId),{projectId,taskId,turnId:turnId||randomUUID(),clauses,submitDenied,fresh:!submitDenied&&submit.some(requestsFreshRun)});
+    turns.set(keyOf(provider,threadId),{projectId,taskId,turnId:turnId||randomUUID(),clauses,submitDenied,submitForbidden,fresh:!submitDenied&&submit.some(requestsFreshRun)});
   }
   function capturePreparation(scope) {
     const key=keyOf(scope.provider,scope.threadId),row=turns.get(key);
@@ -238,7 +253,7 @@ export function createRunActionIntents() {
     if(!row||!Object.hasOwn(runCommands,operation)||typeof runId!=='string'||!runId
       ||!scope.threadId||!scope.projectId||!sameScope(row,scope))return false;
     const {clauses}=row;
-    if(operation==='submit'&&row.submitDenied)return false;
+    if(forbidsRunAction(row,operation))return false;
     const matches=candidates.filter(c=>c.runId===runId);
     if(!matches.some(candidate=>sourceId===undefined||candidate.sourceId===sourceId))return false;
     if(operation==='submit'&&row.fresh){
@@ -246,12 +261,17 @@ export function createRunActionIntents() {
       return !!prepared&&prepared.runId===runId&&prepared.sourceId===sourceId&&prepared.resourceId===resourceId;
     }
     const explicit=clauses.filter(part=>runCommand(part,operation));
-    if(!explicit.length||clauses.some(part=>{
-      const negative=restriction.exec(part);
-      return negative&&runCommand(part.slice(negative[0].length),operation);
-    }))return false;
+    if(!explicit.length)return false;
     if(candidates.length===1)return explicit.some(part=>explicitRunSelectors(part,operation).every(id=>id===runId));
     return explicit.some(part=>mentionsRun(part,runId)&&(matches.length===1||mentionsTarget(part,targetName)));
   }
-  return {record,capturePreparation,permits,forget:(provider,threadId)=>turns.delete(keyOf(provider,threadId))};
+  function confirmationTurn(scope,{action,runId,sourceId,resourceId}){
+    const row=turns.get(keyOf(scope.provider,scope.threadId));
+    if(!row||!scope.projectId||!runId||!sameScope(row,scope)||!Object.hasOwn(runCommands,action)||forbidsRunAction(row,action,{confirmation:true}))return;
+    if(action==='submit'&&row.fresh&&(row.prepared?.runId!==runId||row.prepared.sourceId!==sourceId||row.prepared.resourceId!==resourceId))return;
+    const selections=row.clauses.filter(part=>runCommand(part,action)).flatMap(part=>explicitRunSelectors(part,action));
+    if(selections.length&&!selections.includes(runId))return;
+    return row.turnId;
+  }
+  return {record,capturePreparation,permits,confirmationTurn,forget:(provider,threadId)=>turns.delete(keyOf(provider,threadId))};
 }

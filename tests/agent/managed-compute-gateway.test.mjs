@@ -51,6 +51,24 @@ test('an absent schedule delegation prevents scoped stop before any worker mutat
  assert.equal(f.mutations.length,0);
 });
 
+test('the exact schedule can wait for confirmation and then uses the approved worker scope once',async()=>{
+ const f=fixture(),offered=Promise.withResolvers(),answer=Promise.withResolvers(),dispatched=[];
+ const tools=createManagedComputeTools({resources:{...f.resources,async serviceRequest(_scope,request){
+  request.checkCurrent();request.beforeScheduleDispatch();request.onDispatch();dispatched.push(request.data);
+  return {status:200,data:request.data};
+ }},schedules:{...f.schedules,upsert:(data,op)=>op.request('POST','/api/managed-schedules/upsert',data)},
+ assertWorkflow:f.assertWorkflow,assertRunSource:()=> 'cluster-run',
+ requestScheduleApproval(scope,action,args,details){offered.resolve({scope,action,args,details});return answer.promise;}});
+ const args={resource_id:'ssh:target-b',kind:'poll',run_id:'run-b',mutation_id:'approved-poll',interval_seconds:300,max_runs:4};
+ const pending=tools.call('attach_task_schedule',args,f.scope),approval=await offered.promise;
+ assert.deepEqual(approval,{scope:f.scope,action:'upsert',args,details:{kind:'poll',run_id:'run-b',interval_seconds:300,max_runs:4}});
+ assert.deepEqual(dispatched,[]);
+ let checked=0;answer.resolve({intent:'approved-turn',assert(){checked++;}});
+ const result=await pending;
+ assert.equal(checked,1);assert.equal(dispatched.length,1);assert.equal(result.scope.threadId,f.scope.threadId);
+ assert.equal(result.sourceId,'source-b');assert.equal(result.delegationId,'approved-turn');
+});
+
 test('explicit service run observations preserve both task authority and original target',async()=>{
  const f=fixture();
  const result=await f.tools.call('read_compute_run_status',{resource_id:'ssh:target-b',run_id:'run-b'},f.scope);

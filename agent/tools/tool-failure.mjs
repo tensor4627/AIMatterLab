@@ -1,6 +1,11 @@
 const checkSshLogin=['connection_unconfirmed','Check the original saved SSH connection. Resume a pending login and have the user handle prompts in its private terminal. Wait for verified hosting before acquiring a capability.'];
 const checkSshControl=['connection_unconfirmed','The control check did not complete. Refresh the original saved SSH resource and job service. If the resource shows a verified login, retry the read on that connection. Resume a pending login only when its private terminal shows an authentication prompt. For an unconfirmed write, reconcile the original setup or job first.'];
 const managedRecovery=new Map([
+ ['operation_declined_by_user',['user_declined','The user declined this exact operation. Continue independent work and respect the decision.']],
+ ['operation_approval_expired',['approval_expired','The confirmation expired before dispatch. Continue independent work and return to this operation when the user is ready to decide.']],
+ ['operation_approval_pending',['approval_pending','This exact action already has a confirmation open in the current conversation. Wait for that decision.']],
+ ['operation_approval_interrupted',['approval_interrupted','The confirmation was interrupted before dispatch. Recheck the original conversation and continue when appropriate.']],
+ ['desktop_input_excluded_by_user',['user_declined','The user excluded this desktop path. Continue with other inputs.']],
  ['Use the script directory designated by the user for this resource',['directory_selection_required','Use the directory the user named on this resource. If the directory is unclear, ask them to identify it in this chat.']],
  ['Invalid skill name',['invalid_input','Supply name as 1 to 64 lowercase ASCII letters, digits or hyphens, beginning with a letter. For writes, match the name in the SKILL.md front matter and supply body and expected_sha256. Use null to create a new skill.']],
  ['managed_compute_user_instruction_required',['resource_selection_required','Use a resource the user selected in the picker or directly named in this chat. If a picker is already open, wait for its answer. Report a project or login refusal only when its own receipt identifies that cause.']],
@@ -73,7 +78,7 @@ export function toolFailure(error,{dispatched=false,toolName}={}){
  }else if(/stale|hash|newer human|existing graph in place|saved canonical|reload/i.test(message)){
   code='input_changed';next_step='Read the latest saved workflow and input hashes, preserve human edits, then update that same workflow. Do not reuse a stale preparation.';
  }else if(/permission|sharing|unshared|not authorized|not allowed|protected private|outside this workflow/i.test(message)){
-  code='access_required';next_step='Use inputs already available to this conversation. If a specific file or resource is needed, describe it to the user; do not change access settings through tools.';
+  code='access_required';next_step='If this operation needs additional user authorization, request confirmation of the exact action and target through the available AIMatterLab approval or settings entry. Continue work within the current authorization while waiting.';
  }else if(/connect|disconnected|fetch failed|ECONN|timed? ?out|timeout/i.test(message)){
   code='connection_unavailable';next_step='Check the original connection or service and inspect the existing workflow or run status. Reconcile a write or submission with an unknown result using its original identity.';
  }else if(/required|invalid|missing|expected|must |请选择|参数|缺少/i.test(message)){

@@ -1,5 +1,5 @@
 import {graphAuthorityFacts,protectGraphMirrors} from './composition-authority.mjs';
-import {scienceOnly,scientificSpec,deploymentField,inputControlParameters} from "../../../contracts/compute/deployment.mjs";
+import {scienceOnly,scientificSpec,deploymentField,inputControlParameters,preparedProjectId} from "../../../contracts/compute/deployment.mjs";
 
 import {createHash,randomUUID} from 'node:crypto';
 import {conversationTitle,validConversationName} from "../../../contracts/agent/conversation-title.mjs";
@@ -159,10 +159,14 @@ export class TaskRecords{
    const current=task.deployment?.prepared;
    if(run.id!==expected.artifactId||(deployedKind&&kind!==deployedKind)||task.deployment?.revision!==expected.deploymentRevision||!current||keys.some(key=>current[key]!==expected[key]))throw Error('Prepared run changed; refresh the current input snapshots');
   }
-  if(task.projectId&&task.projectId!==run.project_id&&task.deployment?.config?.projectId!==run.project_id)throw Error('Run project does not match workflow');
   const matches=row=>row.id===run.id&&row.kind===kind,old=task.artifacts.find(matches);
+  const preparedProject=task.deployment?.prepared?.artifactId===run.id?preparedProjectId(task):null;
+  const scopedProject=preparedProject?.startsWith('workflow-scope-')?preparedProject:old?.projectId;
+  if(scopedProject?scopedProject!==run.project_id:
+    run.project_id?.startsWith('workflow-scope-')||task.projectId&&task.projectId!==run.project_id&&preparedProjectId(task)!==run.project_id)
+   throw Error('Run project does not match workflow');
   task.artifacts=task.artifacts.filter(row=>!matches(row));
-  task.artifacts.push({kind,id:run.id,name:run.name,engine:run.engine,parameters:run.parameters||{},preparedRevision:old?.preparedRevision??null});
+  task.artifacts.push({kind,id:run.id,name:run.name,engine:run.engine,parameters:run.parameters||{},preparedRevision:old?.preparedRevision??null,...scopedProject?{projectId:scopedProject}:{}});
   if(task.workflowVersion!==2)task.review={status:'not_run',summary:'运行状态从作业服务读取'};
   const attemptKind=task.execution?.artifactKind||deployedKind;
   const sameAttempt=attemptKind?attemptKind===kind:!task.artifacts.some(row=>row.id===run.id&&row.kind!==kind);

@@ -152,7 +152,7 @@ export function classifyWorkspaceCommand(text, root, cwd) {
     reason: destructive ? 'destructive' : !inside(root, cwd) || outside ? 'outside_workspace' : 'unverified_effects'};
 }
 
-export function createWorkspaceTerminalAuthorization({workspace, connections, current, developerCompute, catalog, emit = () => {}, now = Date.now, uuid = randomUUID}) {
+export function createWorkspaceTerminalAuthorization({workspace, connections, current, developerCompute, permissions, catalog, emit = () => {}, now = Date.now, uuid = randomUUID}) {
   const stages = new Map(), approvals = new Map();
   function settle(row, decision) {
     clearTimeout(row.timer);
@@ -186,6 +186,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     if (!value || Object.keys(value).sort().join(',') !== 'approvalId,decision' || !['approve','deny'].includes(value.decision) || row?.owner !== owning(current())) fail('ssh_terminal_approval_changed');
     try { row.guard(); } catch { settle(row, 'changed'); fail('ssh_terminal_approval_changed'); }
     const status = value.decision === 'approve' ? 'approved' : 'denied';
+    if(status==='approved')permissions?.record(row.view,{id:row.view.approvalId,operation:row.view.reason,resource:row.view.resourceName,paths:row.view.paths});
     settle(row, status);
     return {status};
   }
@@ -240,12 +241,13 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     let response, replacement;
     const approvalMode=developerCompute?.approvalMode(scope,registered.workspaceId)??'manual';
     const full=approvalMode==='full';
+    const workspaceWrite=permissions?.compute('write',root,cwd)===true;
     const automaticGuard=()=>{
       guard();
-      if(developerCompute?.approvalMode(scope,registered.workspaceId)!==approvalMode)fail('ssh_terminal_approval_changed');
+      if((developerCompute?.approvalMode(scope,registered.workspaceId)??'manual')!==approvalMode)fail('ssh_terminal_approval_changed');
     };
     const replacementArgs=(result,mode,args)=>{
-      if (!(approvalMode==='auto'||full)||!inside(root,cwd)||result.status!=='destructive') return;
+      if (!(workspaceWrite||approvalMode==='auto'||full)||!inside(root,cwd)||result.status!=='destructive') return;
       const destination=result.output.replace(/\r?\n$/,'');
       if (!absoluteWorkspace(destination)||!inside(root,destination)) return;
       if (mode==='write') return [destination,'write',args[1]];
@@ -253,7 +255,7 @@ export function createWorkspaceTerminalAuthorization({workspace, connections, cu
     };
     // File mutations inside the selected workspace can use the same kernel-enforced
     // boundary as other workspace programs. Scheduler cancellations affect external state.
-    const confinedMutation=()=>full&&reason==='destructive'&&inside(root,cwd)&&
+    const confinedMutation=()=>(workspaceWrite||full)&&reason==='destructive'&&inside(root,cwd)&&
       paths.every(item=>inside(root,item))&&/^(?:rm|rmdir|unlink|mv|truncate|chmod)\s/.test(command)&&
       words(command)?.slice(1).filter(item=>!item.startsWith('-')).every(item=>!item.startsWith('~')&&inside(root,absolute(cwd,item)));
     if(mode==='cwd'&&args[0]==='-'){

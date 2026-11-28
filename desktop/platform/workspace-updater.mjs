@@ -63,8 +63,8 @@ export async function launchWorkspaceUpdate(file, workspace) {
   throw Error('Installer did not confirm the workspace in time');
 }
 
-export function createWorkspaceUpdater({workspace, currentVersion, fetchApi, tokenFor, publish, install, quit, layered, decodeManifest=readSignedRelease}) {
-  let state = {phase:workspace ? 'idle' : 'disabled', currentVersion, sequence:0};
+export function createWorkspaceUpdater({workspace, currentVersion, announcement, fetchApi, tokenFor, publish, install, quit, layered, decodeManifest=readSignedRelease}) {
+  let state = {phase:workspace ? 'idle' : 'disabled', currentVersion, sequence:0,...announcement?{announcement}:{}};
   let manifest, operations, appPayload, active, releaseSource, downloadSource, verifiedInstaller;
   const lifetime = new AbortController();
   const feeds = createUpdateFeeds({fetchApi,tokenFor,signal:lifetime.signal});

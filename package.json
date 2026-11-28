@@ -80,6 +80,7 @@
       "contracts/**",
       "!contracts/dto/**",
       "!contracts/**/*.d.mts",
+      "CHANGELOG.md",
       {
         "from": "backend/worker",
         "to": "worker",

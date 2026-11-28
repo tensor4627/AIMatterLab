@@ -14,6 +14,7 @@ for(const name of [
  'compute.managed.serviceStatus','compute.managed.updateService',
  'compute.managed.useForWorkflow',
  'compute.terminalApproval.pending','compute.terminalApproval.decide',
+ 'conversation.approvals','conversation.revokeApproval',
  'updates.status','updates.check','updates.download','updates.install','updates.run','updates.accessStatus','updates.setAccess',
  'agent.attachments.import','agent.attachments.preview',
  'agent.cli.inspect','agent.cli.choose','agent.cli.install','agent.cli.cancel',

@@ -26,3 +26,18 @@ export function deploymentProjectId(projects,preferred,config,engine){
  const eligible=projects.filter(project=>!deploymentProjectIssue(project,config,engine));
  return eligible.length===1?eligible[0].id:'';
 }
+
+/** The registered resource determines the available queues for a new deployment. */
+export function resourceDeploymentQueue(cluster,engine,legacyPolicy){
+ if(!Array.isArray(cluster?.queue_targets))return null;
+ const engines=Array.isArray(engine)?engine:[engine];
+ const targets=cluster.queue_targets.filter(target=>target.enabled&&engines.some(id=>target.engines.includes(id)));
+ if(legacyPolicy?.profile_version===cluster.version){
+  const paid=legacyPolicy.paid;
+  return {policy:legacyPolicy,targets:legacyPolicy.new_submission_order.map(id=>targets.find(target=>target.id===id))
+   .filter(target=>target&&(target.usage_class==='owned'||target.usage_class==='paid'&&paid?.permitted&&paid.conditions_known&&paid.conditions?.trim()&&paid.limits))};
+ }
+ const owned=targets.filter(target=>target.usage_class==='owned');
+ const ids=owned.map(target=>target.id);
+ return {targets:owned,policy:{profile_version:cluster.version,allowed_target_ids:ids,new_submission_order:ids}};
+}

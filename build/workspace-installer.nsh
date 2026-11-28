@@ -245,6 +245,10 @@ LangString WorkspaceReopen 1033 "Reopening AIMatterLab…"
     ${EndIf}
   ${EndIf}
   ${If} $workspaceRestartDir != ""
+    System::Call 'kernel32::CreateFileW(w "$INSTDIR\user-cache\updates\announce-update-${VERSION}.ready", i 0x40000000, i 0, p 0, i 2, i 0x80, p 0)p.r0'
+    ${If} $0 != -1
+      System::Call 'kernel32::CloseHandle(p r0)'
+    ${EndIf}
     DetailPrint "$(WorkspaceReopen)"
     Call WorkspaceStartApp
   ${EndIf}

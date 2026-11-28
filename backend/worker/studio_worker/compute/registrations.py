@@ -42,6 +42,19 @@ class RegistrationsMixin:
             raise ValueError("Project name required")
         value.setdefault("id", secrets.token_hex(8))
         leaf(value["id"])
+        if value["id"].startswith("workflow-scope-") or "conversation_scope" in value:
+            scope = value.get("conversation_scope")
+            fields = {"id", "name", "policy", "conversation_scope"}
+            if set(value) != fields or not value["id"].startswith("workflow-scope-") or not isinstance(scope, dict) or not scope.get("owner") or not scope.get("workflow"):
+                raise ValueError("A desktop conversation scope is required")
+            try:
+                previous = self.store.get("project", value["id"])
+            except ValueError:
+                previous = None
+            if previous is not None:
+                if any(previous.get(field) != value[field] for field in fields):
+                    raise PermissionError("The original conversation deployment scope is immutable")
+                return previous
         policy = value.setdefault("policy", {})
         for key, default in {"engines": list(ENGINES), "gpus": [0], "max_seconds": 3600,
                              "max_concurrent": 1, "input_roots": [], "environments": []}.items():

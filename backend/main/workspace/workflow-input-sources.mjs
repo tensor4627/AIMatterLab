@@ -20,9 +20,9 @@ const identity = value => [value.dev, value.ino, value.size, value.mtimeNs, valu
 
 const boundedPath = {type:'string', minLength:1, maxLength:4096};
 export const workflowInputSourceTools = [
- {name:'find_local_input_files', description:'List candidate scientific files beneath a directory explicitly supplied by the user on the desktop machine. Returns bounded relative filenames. Refine by filename or use import_workflow_input for an exact result.',
+ {name:'find_local_input_files', description:'List candidate scientific files beneath an exact desktop directory. If its read scope needs approval, AIMatterLab asks in this conversation before listing. Returns bounded relative filenames. Refine by filename or use import_workflow_input for an exact result.',
   inputSchema:{type:'object', properties:{project_id:boundedPath, directory:boundedPath, name_contains:{type:'string', maxLength:120}}, required:['project_id','directory'], additionalProperties:false}, annotations:{readOnlyHint:true}},
- {name:'import_workflow_input', description:'Copy an exact desktop file supplied by the user or found by find_local_input_files, or download a public HTTPS data file, into the current workflow. Supply exactly one of local_file and url. An optional name supplies the actual input basename, without changing the format. Returns a verified path for the specific file field and parameters.files. Use copy_project_inputs for files already on the selected SSH resource.',
+ {name:'import_workflow_input', description:'Copy an exact desktop file into the current workflow, or download a public HTTPS data file. If the desktop read needs approval, AIMatterLab asks in this conversation before reading the file. Supply exactly one of local_file and url. An optional name supplies the actual input basename, without changing the format. Returns a verified path for the specific file field and parameters.files. Use copy_project_inputs for files already on the selected SSH resource.',
   inputSchema:{type:'object', properties:{project_id:boundedPath, local_file:boundedPath, url:boundedPath, name:{type:'string', maxLength:200}, sha256:{type:'string', pattern:'^[a-f0-9]{64}$'}}, required:['project_id'], additionalProperties:false}, annotations:{readOnlyHint:false, destructiveHint:false, idempotentHint:true, openWorldHint:true}},
 ];
 
@@ -38,14 +38,16 @@ function inputName(value){
  return value;
 }
 
+function within(root,file){
+ const relative=path.relative(canonical(root),canonical(file));
+ return !relative||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep);
+}
+
 function nativePath(value, protectedRoots){
  if(typeof value!=='string'||value.length>4096||!path.isAbsolute(value)||/^[\\/]{2}|[\x00-\x1f]/.test(value)||value.split(/[\\/]/).some(part=>part==='.'||part==='..')||win&&(!/^[a-z]:[\\/]/i.test(value)||/[<>"|?*:]/.test(value.slice(2))))throw Error('Enter an absolute path on the desktop machine');
  const file=path.resolve(value);
  assertDataPath(file);
- if(protectedRoots.some(root=>{
-  const relative=path.relative(canonical(root),canonical(file));
-  return !relative||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep);
- }))throw Error('Choose a path outside application and account settings');
+ if(protectedRoots.some(root=>within(root,file)))throw Error('Choose a path outside application and account settings');
  return file;
 }
 
@@ -56,16 +58,18 @@ async function nativeStat(file){
 }
 
 // Only an exact path token in a human message supplies desktop read scope.
-function mentioned(text, value){
+function pathMention(text,value){
  const message=canonical(text||''), target=canonical(value);
  const quotes={'"':'"',"'":"'",'`':'`','“':'”','‘':'’'};
+ let selected=false;
  for(let start=message.indexOf(target);start>=0;start=message.indexOf(target,start+target.length)){
   const before=message[start-1]||'', after=message[start+target.length]||'';
   if(/[\w:/\\]/.test(before)||Object.hasOwn(quotes,before)&&quotes[before]!==after||after&&!/[\s"'`”’,;，；。！？）】]/.test(after))continue;
   const clause=message.slice(Math.max(0,start-80),start).split(/[\n。；;，,]/).at(-1);
-  if(!/不要|禁止|勿|(?:do not|don't|never)\b/i.test(clause))return true;
+  if(/不要|禁止|勿|(?:do not|don't|never)\b/i.test(clause))return 'excluded';
+  selected=true;
  }
- return false;
+ return selected?'selected':null;
 }
 
 async function publishFile(worker, owner, file, name, source, expectedSha){
@@ -153,9 +157,9 @@ async function stagePublicWorkflowInput(worker, owner, args, open){
  }
 }
 
-export function createWorkflowInputSources({worker, current, userRequest, protectedRoots=[], open=openPublicSoftware}){
+export function createWorkflowInputSources({worker, current, userRequest, protectedRoots=[], desktopRoot, permissions, requestApproval, open=openPublicSoftware}){
  const candidates=new Map();
- return async(name,args,scope)=>{
+ return async(name,args,scope,{signal}={})=>{
   const task=current(scope), authoring=task.authoring, connection=worker.connection,epoch=worker.connectionEpoch;
   const owner={projectId:authoring?.projectId,inputRoot:authoring?.inputRoot,guard(){
    const latest=current(scope);
@@ -164,11 +168,21 @@ export function createWorkflowInputSources({worker, current, userRequest, protec
   }};
   owner.guard();
   const request=userRequest(scope)||task.request;
-  const supplied=value=>mentioned(request,value)||mentioned(request,value+path.sep);
+  const supplied=(value,file)=>{
+   const matches=[pathMention(request,value),pathMention(request,value+path.sep)];
+   if(matches.includes('excluded'))throw Object.assign(Error('desktop_input_excluded_by_user'),{operationNotStarted:true});
+   return permissions?permissions.desktop('read',file):matches.includes('selected')||!!desktopRoot&&within(desktopRoot,file);
+  };
+  const confirm=async(operation,details,unavailable)=>{
+   if(!requestApproval)throw Error(unavailable);
+   if(await requestApproval(scope,operation,details,{signal})!==true)throw Object.assign(Error('operation_declined_by_user'),{operationNotStarted:true});
+   owner.guard();
+  };
   if(name==='find_local_input_files'){
    if(Object.keys(args).some(key=>!['project_id','directory','name_contains'].includes(key))||args.name_contains!==undefined&&(typeof args.name_contains!=='string'||args.name_contains.length>120))throw Error('Use an explicit desktop directory and optional filename filter');
    const root=nativePath(args.directory,protectedRoots);
-   if(!supplied(args.directory))throw Error('Use the desktop directory explicitly named in the current user request');
+   const authorized=supplied(args.directory,root);
+   if(!authorized&&!permissions?.allowsDesktopRead(scope,'list',root))await confirm('list',{directory:root,...args.name_contains?{filter:args.name_contains}:{}},'Use the desktop directory explicitly named in the current user request');
    if(!(await nativeStat(root)).isDirectory())throw Error('The desktop input path is not a directory');
    const found=[],pending=[{directory:root,depth:0}];let visited=0,truncated=false;
    const filter=args.name_contains?.toLowerCase();
@@ -185,18 +199,22 @@ export function createWorkflowInputSources({worker, current, userRequest, protec
     }
    }
    owner.guard();
-   const prior=candidates.get(task.id), files=prior?.projectId===owner.projectId?prior.files:new Set();
-   for(const entry of found)files.add(canonical(path.join(root,entry.relative_file)));
-   candidates.delete(task.id);candidates.set(task.id,{projectId:owner.projectId,files:new Set([...files].slice(-128))});
-   if(candidates.size>128)candidates.delete(candidates.keys().next().value);
+   if(authorized){
+    const prior=candidates.get(task.id),files=prior?.projectId===owner.projectId?prior.files:new Set();
+    for(const entry of found)files.add(canonical(path.join(root,entry.relative_file)));
+    candidates.delete(task.id);candidates.set(task.id,{projectId:owner.projectId,files:new Set([...files].slice(-128))});
+    if(candidates.size>128)candidates.delete(candidates.keys().next().value);
+   }
    return {status:'listed',entries:found,truncated:truncated||pending.length>0};
   }
   if(name!=='import_workflow_input'||Object.keys(args).some(key=>!['project_id','local_file','url','name','sha256'].includes(key))||Object.hasOwn(args,'local_file')===Object.hasOwn(args,'url')||args.sha256!==undefined&&(typeof args.sha256!=='string'||!checksum.test(args.sha256)))throw Error('Choose exactly one desktop file or public file URL');
   let file;
   if(Object.hasOwn(args,'local_file')){
    const selected=nativePath(args.local_file,protectedRoots), prior=candidates.get(task.id);
-   if(!supplied(args.local_file)&&!(prior?.projectId===owner.projectId&&prior.files.has(canonical(selected))))throw Error('Choose a desktop file supplied by the user or returned by the authorized directory search');
-   file=await stageLocalWorkflowInput(worker,owner,selected,{name:args.name,expectedSha:args.sha256,protectedRoots});
+   const name=inputName(args.name??path.basename(selected));
+   if(!supplied(args.local_file,selected)&&!permissions?.allowsDesktopRead(scope,'import',selected)&&!(prior?.projectId===owner.projectId&&prior.files.has(canonical(selected))))
+    await confirm('import',{source:selected,destination:owner.inputRoot,name},'Choose a desktop file supplied by the user or returned by the authorized directory search');
+   file=await stageLocalWorkflowInput(worker,owner,selected,{name,expectedSha:args.sha256,protectedRoots});
   }else{
    if(typeof args.url!=='string'||args.url.length>4096)throw Error('Use an exact public HTTPS file URL');
    file=await stagePublicWorkflowInput(worker,owner,args,open);

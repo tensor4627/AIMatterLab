@@ -20,7 +20,7 @@ function fields(value,expected) {
 export function createManagedWorkbench({catalog,profiles,registration,terminal,projectSkills,resourceActivity,projectAccess,
  records,workflow,agents,privateAccess,workerSource,sshTransportSource,handle,notify,dispatch,announce=()=>{},
  worker,conversationTerminals,closeSsh,assertConnectionIdle,resourceWorkspace,terminalAuthorization,developerCompute,hostedServiceReplaced,
- onConnectionLost,onConnectionReplaced,resourceChoiceTitle=()=>'选择本次操作的计算资源'}) {
+ onConnectionLost,onConnectionReplaced,english=()=>false,resourceChoiceTitle=()=>'选择本次操作的计算资源'}) {
   const delegations=createScheduleDelegations(catalog),runIntents=createRunActionIntents();
   let schedules;
   const named=notice=>({...notice,resourceName:resourceActivity.label(notice.profileId)||notice.profileId});
@@ -37,6 +37,7 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
     return artifacts.length===1?artifacts[0].kind:null;
   }
   const liveHumanTurn=scope=>agents.turnOrigin(scope.provider,scope.threadId)==='human'&&agents.isBusy(scope.provider,scope.threadId);
+  const runApprovalTurn=(scope,ref)=>agents.requestOperationApproval&&liveHumanTurn(scope)?runIntents.confirmationTurn(scope,ref):undefined;
   function permitsRunAction(scope,action,runId,resourceId,sourceId) {
     if(!liveHumanTurn(scope))return false;
     const task=records.bound(scope.provider,scope.threadId),available=new Map();
@@ -57,10 +58,29 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
       return workflow.currentFor(provider,threadId);
     },
     taskSource:scope=>taskWorkerSource(records.bound(scope.provider,scope.threadId)),
+    offerResourcePicker:typeof agents.requestComputeResource==='function',
     authorizeTerminal:(scope,resource)=>projectAccess.terminalDecision(scope,resource),
     terminalPolicyRevision:(scope,resource)=>projectAccess.terminalRevision(scope,resource),
+    requestTerminalApproval:agents.requestOperationApproval?(scope,resource,access,options)=>{
+      const message=english()?'Allow this conversation to use the selected SSH capability?':'允许此会话使用以下 SSH 能力？';
+      const details={resource:resource.name,resource_id:resource.resourceId,access,account:resource.workspace.account,
+        host:resource.workspace.hostname,workspace:resource.workspace.root};
+      return agents.requestOperationApproval(scope,{message,details},options);
+    }:undefined,
     authorizeRun:(scope,args)=>!!authorizeRun(scope,args),
     authorizeRunAction:(scope,{action,runId,resourceId,sourceId})=>permitsRunAction(scope,action,runId,resourceId,sourceId),
+    requestRunApproval:agents.requestOperationApproval?async(scope,ref,run,resource,{signal})=>{
+      const turn=runApprovalTurn(scope,ref);
+      if(!turn)throw Error('managed_run_user_instruction_required');
+      const labels={validate:['Validate this run?','允许校验此作业？'],submit:['Submit this run?','允许提交此作业？'],cancel:['Cancel this run?','允许取消此作业？']};
+      const message=labels[ref.action][english()?0:1];
+      const details={resource:resource.name,resource_id:ref.resourceId,run_id:ref.runId,action:ref.action,status:run.status,
+        ...run.name?{name:run.name}:{},...run.job_id?{job_id:run.job_id}:{},...run.engine?{engine:run.engine}:{},
+        ...run.environment_id?{environment_id:run.environment_id}:{},...run.cluster_id?{cluster_id:run.cluster_id}:{},
+        ...run.resources?{resources:run.resources}:{},...run.max_seconds?{max_seconds:run.max_seconds}:{}};
+      await agents.requestOperationApproval(scope,{message,details},{signal});
+      return ()=>!signal?.aborted&&runApprovalTurn(scope,ref)===turn;
+    }:undefined,
     authorizeSchedule:(scope,{sourceId,scheduleId})=>!!schedules?.snapshot().sources.find(s=>s.id===sourceId)?.schedules.some(p=>
        p.id===scheduleId&&p.scope.taskId===scheduleOwnerId(scope)&&['provider','threadId','projectId'].every(k=>p.scope[k]===scope[k])),
     onAcquired:(scope,resource)=>{resourceActivity.acquired(scope,resource);notify();},
@@ -88,7 +108,21 @@ export function createManagedWorkbench({catalog,profiles,registration,terminal,p
       if(action==='upsert'&&agents.turnOrigin(scope.provider,scope.threadId)==='service')throw Error('managed_schedule_user_renewal_required');
       return delegations.assert(scope,action,args);
     },
-    assertRunIntent:(scope,action,args,sourceId)=>{if(!permitsRunAction(scope,action,args.run_id,args.resource_id,sourceId))throw Error('managed_run_user_instruction_required');},
+    requestScheduleApproval:agents.requestOperationApproval?async(scope,action,args,details,{signal})=>{
+      const current=()=>liveHumanTurn(scope)&&!signal?.aborted&&delegations.confirmationTurn(scope,action,args);
+      const intent=current();
+      if(!intent)throw Error('managed_schedule_task_delegation_required');
+      const resource=resources.snapshot().find(resource=>resource.resourceId===args.resource_id);
+      if(!resource)throw Error('managed_compute_resource_unavailable');
+      const message=action==='stop'?(english()?'Stop this schedule?':'允许停止此定时任务？'):
+        (english()?'Save this schedule on the selected resource?':'允许在所选资源上保存此定时任务？');
+      await agents.requestOperationApproval(scope,{message,details:{resource:resource.name,resource_id:args.resource_id,...details}},{signal});
+      return {intent,assert(){if(current()!==intent)throw Error('managed_schedule_task_delegation_required');}};
+    }:undefined,
+    assertRunIntent:(scope,action,args,sourceId)=>{
+      const {run_id:runId,resource_id:resourceId}=args;
+      if(!permitsRunAction(scope,action,runId,resourceId,sourceId)&&!runApprovalTurn(scope,{action,runId,resourceId,sourceId}))throw Error('managed_run_user_instruction_required');
+    },
     assertRunSource:({scope,sourceId,runId,kind})=>{const actual=authorizeRun(scope,{sourceId,runId,kind});if(!actual)throw Error('managed_compute_original_run_unconfirmed');return actual;},
     captureRunPreparation:scope=>liveHumanTurn(scope)?runIntents.capturePreparation(scope):undefined,
     onRunObserved:entry=>{

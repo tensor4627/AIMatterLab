@@ -56,6 +56,29 @@ function workflow(service, request, ssh=false){
  return {records,task,worker,scope,projectId,current,call};
 }
 
+test('a desktop listing approval does not grant reading the listed file or survive a worker change',async t=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'workflow-approval-'));
+ const file=path.join(directory,'model.xyz');await fs.writeFile(file,modelBytes);
+ t.after(async()=>{await fs.unlink(file);await fs.rmdir(directory);});
+ const approvals=[],connection={health:{root:'/fixture/worker'}};
+ const task={id:'task',request:'Find the input',authoring:{projectId:'project',inputRoot:'/fixture/inputs'}};
+ const worker={connection,connectionEpoch:1,request(){assert.fail('No transfer can start until the source is approved');}};
+ let allow=true,changeWorker=false;
+ const tools=createWorkflowInputSources({worker,current:()=>task,userRequest:()=>task.request,requestApproval(_scope,operation,details){
+  approvals.push({operation,details});if(changeWorker)worker.connectionEpoch++;return allow;
+ }});
+ const list=()=>tools('find_local_input_files',{project_id:'project',directory},{});
+ assert.deepEqual((await list()).entries,[{name:'model.xyz',relative_file:'model.xyz'}]);
+ allow=false;
+ await assert.rejects(tools('import_workflow_input',{project_id:'project',local_file:file},{}),/operation_declined_by_user/);
+ assert.deepEqual(approvals,[{operation:'list',details:{directory}},{operation:'import',details:{source:file,destination:'/fixture/inputs',name:'model.xyz'}}]);
+ allow=true;changeWorker=true;
+ await assert.rejects(list(),/Restore the original workflow authoring service/);
+ task.request=`不要读取 "${file}"。`;
+ await assert.rejects(tools('import_workflow_input',{project_id:'project',local_file:file},{}),/desktop_input_excluded_by_user/);
+ assert.equal(approvals.length,3);
+});
+
 test('desktop and public files, selected SSH files and supplied scientific values reach prepared inputs', {timeout:45000}, async t=>{
  if(windows&&probeWslAccess().status!=='allowed'){t.skip('Run from a Windows account with WSL access');return;}
  const service=await startWorker(t);
@@ -103,13 +126,16 @@ test('desktop and public files, selected SSH files and supplied scientific value
  f.records.edit({id:f.task.id,changes:{steps:500}});
  assert.deepEqual(f.current().missingFields,[]);
  const active=f.current().parameters;
- const deploy={target:'local',projectId:f.projectId,targetId:service.environment,directoryName:'source-test',maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:1024}};
+ const deploy={target:'local',targetId:service.environment,directoryName:'source-test',maxSeconds:60,gpu:0,resources:{cpus:1,gpus:1,memory_mb:1024}};
  saveDeployment(f.records,{taskId:f.task.id,value:deploy},null,f.worker);
  await assert.rejects(prepareDeployment(f.records,f.worker,{taskId:f.task.id}),/Declared scientific parameter differs from run.in: steps/);
  const actual=runInput.replace('run 200','run '+active.steps);
  await f.worker.request('POST','/api/workspace/write',{project_id:f.projectId,name:config.path.slice(service.inputRoot.length+1),content:actual,expected_sha256:config.sha256});
  const prepared=await prepareDeployment(f.records,f.worker,{taskId:f.task.id});
  assert.equal(prepared.status,'draft');
+ assert.match(prepared.project_id,/^workflow-scope-/);
+ assert.equal(f.current().deployment.prepared.projectId,prepared.project_id);
+ assert(!(await f.worker.request('GET','/api/projects')).some(project=>project.id===prepared.project_id));
  assert.deepEqual(prepared.snapshots.map(row=>[row.name,row.sha256]),[['model.xyz',model.sha256],['nep.txt',potential.sha256],['run.in',sha(actual)]]);
  assert.deepEqual(prepared.input_contract,{status:'passed',checked_fields:['steps','time_step_fs','temperature'],scope:'declared simple GPUMD input controls only'});
  await assert.rejects(tool('import_workflow_input',{url:'https://example.org/case/run.in',sha256:sha(runInput)}),/SHA-256 differs/);

@@ -73,7 +73,7 @@ test('plan_resource_tool_setup propagates declared parameter_specs and enforces 
 });
 
 async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>null,developerCompute,reportedHome,discover=()=>[],
- resolveSelectedDefinition,ownedResources}={}){
+ resolveSelectedDefinition,ownedResources,requestApproval}={}){
  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'aimlab-resource-tools-'));
  t.after(()=>fs.rm(temp,{recursive:true,force:true}));
  const scope={provider:'codex',threadId:'setup-chat',projectId:'project1',checkCurrent:()=>true};
@@ -120,7 +120,7 @@ async function fixture(t,{confirm=async()=>true,withRelease,chooseFile=async()=>
   })),
  };
  let context=1;
- const controller=createResourceToolController({resources,skills,chooseFile,withRelease,confirm,developerCompute,resolveSelectedDefinition,current:()=>context,
+ const controller=createResourceToolController({resources,skills,chooseFile,withRelease,confirm,requestApproval,developerCompute,resolveSelectedDefinition,current:()=>context,
   emit:value=>events.push(value),setTimer:value=>{timers.push(value);return {};},clearTimer:()=>{},
   workspaces:{
    resolveHostedResourceWorkspace:(id,{profileId,hostIdentity})=>registry.find(row=>row.profileId===profileId&&row.hostIdentity.machineId===hostIdentity.machineId&&(!id||id===row.resourceId)),
@@ -243,6 +243,25 @@ test('a later setup request can use the last reviewed representative only within
  await assert.rejects(plan(),/reviewed scan/);
  assert.equal(f.calls.filter(row=>row.route.endsWith('/plan')).length,1);
  assert.equal(f.calls.filter(row=>row.route.endsWith('/start')).length,0);
+});
+
+test('an undesignated script directory and tool draft wait for approval in the originating conversation',async t=>{
+ const approvals=[];let allow=false;
+ const f=await fixture(t,{requestApproval(scope,operation,details){
+  assert.equal(scope.threadId,f.scope.threadId);approvals.push({operation,details});return allow;
+ }});
+ const resource_id=f.ref().resource_id,directory='/archive';
+ const discover=()=>f.api.call('discover_resource_tool_scripts',{resource_id,directory},f.scope);
+ await assert.rejects(discover(),/operation_declined_by_user/);
+ assert.equal(f.calls.length,0);
+ allow=true;assert.equal((await discover()).directory,directory);
+ assert.deepEqual(approvals[0],{operation:'discover',details:{resource:'Lab',resource_id,directory}});
+
+ const manifest={name:'Example',version:'1',source:{kind:'installed',executable:directory+'/tool.sh'}};
+ const draft=await f.api.call('plan_resource_tool_setup',{resource_id,route:'existing',cluster_id:'cluster',environment_id:'env',manifest},f.scope);
+ assert.equal(draft.status,'planned');
+ assert.equal(approvals.at(-1).operation,'plan');assert.equal(approvals.at(-1).details.program,manifest.source.executable);
+ assert.equal(f.calls.some(call=>call.route.endsWith('/start')),false);
 });
 
 test('a script discovery that completes after the next user turn cannot replace its review',async t=>{

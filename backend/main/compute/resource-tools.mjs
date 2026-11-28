@@ -81,7 +81,7 @@ const manifest={
 };
 const definitions=[
  input('list_resource_tools','List tool setup progress and scheduler targets for the acquired SSH resource and current project. Active entries include their exact environment, execution skill, and minimal test job.',{resource_id}),
- input('discover_resource_tool_scripts','Scan a user-designated directory on the acquired SSH resource. Report script groups and representative file hashes for the user to select.',{resource_id,directory:text}),
+ input('discover_resource_tool_scripts','Scan an exact directory on the acquired SSH resource. AIMatterLab asks for confirmation when the directory needs a user decision. Report script groups and representative file hashes for the user to select.',{resource_id,directory:text}),
  input('plan_resource_tool_setup','Save an editable resource tool setup for desktop review. The desktop starts installation or the allocation test after review. Use exact resource and scheduler IDs from list_resource_tools and read the bundled setup guide.',{
   resource_id,route:{enum:['fresh','existing','custom']},cluster_id:text,environment_id:text,queue_target_id:text,prior_run_id:{type:'string',pattern:'^[a-f0-9]{24}$'},
   manifest,selected_definition,candidate:{...object({path:text,sha256:setup_id}),description:'For the existing route, use the reviewed script path as manifest.source.executable and supply the digest of that same file.'}
@@ -91,7 +91,7 @@ const definitions=[
 const names=new Set(definitions.map(tool=>tool.name));
 const terminalStates=new Set(['active','failed','needs_file','planned']);
 
-export function createResourceToolController({resources,workspaces,skills,developerCompute,chooseFile,confirm,resolveSelectedDefinition,emit=()=>{},
+export function createResourceToolController({resources,workspaces,skills,developerCompute,permissions,chooseFile,confirm,requestApproval,resolveSelectedDefinition,emit=()=>{},
  current=()=>true,withRelease=withDesktopRelease,upload=transferRelease,inspect=inspectDesktopSource,setTimer=setTimeout,clearTimer=clearTimeout}){
  const desktopDownloads=new Map(),watches=new Map(),turns=new Map(),saveFailures=new Map();
  const selectedFiles=new Map(),setupFiles=new Map();
@@ -346,12 +346,11 @@ export function createResourceToolController({resources,workspaces,skills,develo
   return result;
  }
 
- async function discoverScripts(selected,directory,instruction){
+ async function discoverScripts(selected,directory,instruction,reviewDirectory){
   if(typeof directory!=='string'||!directory)throw directoryRequired();
   const abbreviated=directory==='~'||directory.startsWith('~/');
-  const designated=instruction===undefined||namesDirectory(instruction,directory);
-  if(!designated&&!abbreviated&&!(directory.startsWith('/')&&(instruction.includes('~/')||namesDirectory(instruction,'~'))))throw directoryRequired();
-  if(abbreviated||!designated){
+  let designated=instruction===undefined||namesDirectory(instruction,directory);
+  if(abbreviated||!designated&&directory.startsWith('/')&&(instruction.includes('~/')||namesDirectory(instruction,'~'))){
    const health=await selected.request('GET','/api/health');
    const home=health?.home;
    if(typeof home!=='string'||!path.posix.isAbsolute(home)||path.posix.normalize(home)!==home||/[\\\x00-\x1f\x7f]/.test(home)){
@@ -361,11 +360,16 @@ export function createResourceToolController({resources,workspaces,skills,develo
    const prefix=home.replace(/\/$/,'');
    if(abbreviated){
     directory=prefix+(directory.slice(1)||'/');
-    if(!designated&&!namesDirectory(instruction,directory))throw directoryRequired();
+    designated=designated||namesDirectory(instruction,directory);
    }else{
     const homeNotation=directory===home?'~':directory.startsWith(prefix+'/')?'~'+directory.slice(prefix.length):null;
-    if(!namesDirectory(instruction,homeNotation))throw directoryRequired();
+    designated=namesDirectory(instruction,homeNotation);
    }
+  }
+  if(!designated){
+   if(!reviewDirectory||!path.posix.isAbsolute(directory)||/[\\\x00-\x1f\x7f]/.test(directory)||directory.split('/').some(part=>part==='..'||part==='.'))throw directoryRequired();
+   await reviewDirectory(directory);
+   selected.check();
   }
   await selected.register();
   return selected.call('discover',{workspace_id:selected.registration.workspaceId,directory});
@@ -422,7 +426,7 @@ export function createResourceToolController({resources,workspaces,skills,develo
   rememberTurn(key,input,directoryInstruction);
  }
 
- async function call(name,args,scope){
+ async function call(name,args,scope,{signal}={}){
   if(!names.has(name)||!args||scope.checkCurrent?.()!==true)throw Error('Invalid resource tool arguments');
   const key=ownerKey(scope),turn=turns.get(key)??rememberTurn(key,'');
   const selected=await resolveSkills(scope,args.resource_id,name==='list_resource_tools'||name==='discover_resource_tool_scripts',
@@ -431,13 +435,25 @@ export function createResourceToolController({resources,workspaces,skills,develo
   const workspace_id=selected.registration.workspaceId;
   const development=developerCompute?.allows(scope,workspace_id)===true;
   const user=turn.user;
+  const review=requestApproval?async(operation,details)=>{
+   const check=()=>{
+    selected.check();
+    if(signal?.aborted||turns.get(key)!==turn)throw Object.assign(Error('operation_approval_interrupted'),{operationNotStarted:true});
+   };
+   check();
+   if(await requestApproval(scope,operation,{resource:selected.selected.name,resource_id:args.resource_id,...details},{signal})!==true)
+    throw Object.assign(Error('operation_declined_by_user'),{operationNotStarted:true});
+   check();
+  }:null;
   if(name==='discover_resource_tool_scripts'){
    fields(args,['resource_id','directory']);
    const scan={context:scanContext(selected,project_id??null),representatives:null};
    const remembered=turn.directoryInstruction;
    const instruction=remembered?.context===scan.context?remembered.text:user;
    turn.scan=scan;turn.examples=null;
-   const result=await discoverScripts(selected,args.directory,development?undefined:instruction);
+   const readAllowed=permissions?.compute('read',selected.registration.root,args.directory);
+   const result=await discoverScripts(selected,args.directory,development||readAllowed?undefined:instruction,
+    review?directory=>review('discover',{directory}):undefined);
    if(turns.get(key)===turn&&turn.scan===scan){
     scan.representatives=new Map(result.candidates.filter(row=>sha256.test(row.sha256)).map(row=>[row.path,row.sha256]));
     turn.examples=new Set(result.candidates.flatMap(row=>row.examples));
@@ -455,14 +471,16 @@ export function createResourceToolController({resources,workspaces,skills,develo
   if(!project_id)throw Error('Select the authorized project for this resource');
   if(name==='plan_resource_tool_setup'){
    fields(args,['resource_id','manifest','route','cluster_id','environment_id'],['candidate','queue_target_id','prior_run_id','selected_definition']);
-   if(!development&&!setupRequest.test(user))throw Object.assign(Error('A current user request for tool setup is required before drafting'),{operationNotStarted:true});
+   const needsIntent=!development&&!setupRequest.test(user);
+   if(needsIntent&&!review)throw Object.assign(Error('A current user request for tool setup is required before drafting'),{operationNotStarted:true});
    const source=args.manifest?.source;
    const scan=turn.scan;
    const reviewed=scan?.context===scanContext(selected,project_id)&&(turn.examples?.has(source?.executable)||
     args.route==='existing'&&args.candidate?.path===source?.executable&&sha256.test(args.candidate?.sha256)&&
     scan.representatives?.get(source?.executable)===args.candidate.sha256);
-   if(source?.kind==='installed'&&(!source.executable||!portablePath(selected.registration.root,source.executable)&&
-      !user.includes(source.executable)&&!reviewed)){
+   const needsSource=source?.kind==='installed'&&(!source.executable||!portablePath(selected.registration.root,source.executable)&&
+      !user.includes(source.executable)&&!reviewed);
+   if(needsSource&&(!review||typeof source.executable!=='string'||!path.posix.isAbsolute(source.executable)||/[\\\x00-\x1f\x7f]/.test(source.executable))){
     throw Error('Use a script from the reviewed scan or an installed path designated by the user');
    }
    let binding,onboarding,setupManifest=args.manifest;
@@ -474,6 +492,9 @@ export function createResourceToolController({resources,workspaces,skills,develo
     onboarding=bindResourceToolDefinition(binding.record,args.selected_definition,args.manifest);
     if(onboarding.parameter_specs)setupManifest={...args.manifest,parameter_specs:onboarding.parameter_specs};
    }
+   if(needsIntent||needsSource)await review('plan',{tool:setupManifest?.name,version:setupManifest?.version,route:args.route,
+    ...source?.executable?{program:source.executable}:{},environment_id:args.environment_id,cluster_id:args.cluster_id,
+    ...args.queue_target_id?{queue_target_id:args.queue_target_id}:{}});
    await selected.register();
    binding?.check();
    return plan(selected,{...args,manifest:setupManifest,request_id:randomUUID(),project_id},onboarding);

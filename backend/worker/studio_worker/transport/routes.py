@@ -71,6 +71,18 @@ def cancel_options(data):
 
 
 def dispatch(service, method, path, data, admin=False):
+    if not admin and isinstance(data, dict):
+        spec = data.get('spec') if isinstance(data.get('spec'), dict) else {}
+        project_ids = (data.get('project_id'), spec.get('project_id'))
+        if any(isinstance(value, str) and value.startswith('workflow-scope-') for value in project_ids):
+            raise PermissionError('Use the originating desktop workflow for this deployment')
+        if isinstance(data.get('run_id'), str) and path.startswith(('/api/run/', '/api/cluster/')):
+            try:
+                run = service.store.get('cluster-run' if path.startswith('/api/cluster/') else 'run', data['run_id'])
+            except ValueError:
+                run = {}
+            if str(run.get('project_id', '')).startswith('workflow-scope-'):
+                raise PermissionError('Use the originating desktop workflow for this run')
     if path.startswith('/api/resource-tools/'):
         if method != 'POST' or not admin or not getattr(service, 'ssh_service_mode', False):
             raise PermissionError('Desktop resource tool channel required')
@@ -160,7 +172,7 @@ def dispatch(service, method, path, data, admin=False):
         if path == "/api/source-projects":
             return store.list("source-project")
         if path == "/api/projects":
-            return store.list("project")
+            return [project for project in store.list("project") if not project.get("conversation_scope")]
         if path == "/api/environments":
             return store.list("environment")
         if path == "/api/workflows":
@@ -187,6 +199,13 @@ def dispatch(service, method, path, data, admin=False):
                 from studio_worker.tools.resource_tools import registered_engines
                 return [*ENGINES, *registered_engines(service)]
             return list(ENGINES)
+    if method == 'POST' and path == '/api/desktop/deployment-scope/read':
+        if not admin:
+            raise PermissionError('Desktop conversation scope required')
+        project = store.get('project', data['project_id'])
+        if not project.get('conversation_scope'):
+            raise PermissionError('Desktop conversation scope required')
+        return {key: project[key] for key in ('id', 'name', 'policy', 'conversation_scope')}
     if path in ("/api/projects", "/api/environments") and method == "POST":
         if not admin:
             raise PermissionError("Only the desktop user can change authorization/environments")

@@ -3,7 +3,8 @@ import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {consumerTargetScope,assertPreparedConsumerTarget,assertConsumerSnapshotReadback} from './consumer-target-identity.mjs';
 import {digest,reviewFingerprint} from './review-authority.mjs';
-import {validDeployment} from "../../../contracts/compute/deployment.mjs";
+import {scientificSpec,validDeployment} from "../../../contracts/compute/deployment.mjs";
+import {describeWorkflowDeploymentScope} from './workflow-deployment-scope.mjs';
 
 const clone=v=>structuredClone(v),object=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 function request(v,keys){if(!object(v)||!equal(Object.keys(v).sort(),keys.slice().sort())||typeof v.taskId!=='string'||!v.taskId||v.taskId.length>200)throw Error('Invalid typed consumer target request');}
@@ -14,8 +15,31 @@ export function createTaskConsumerTarget({records,worker,current,assertHuman,sci
  function owner(id,verification=false){const task=records.read(id),selection=clone(current());if(!['bias.validate','gpumd.sampling'].includes(task.parameters?.engine)||task.workflowVersion!==2||!task.threadId||records.deleted(task.provider,task.threadId)||records.bound(task.provider,task.threadId)?.id!==task.id||!selection||selection.provider!==task.provider||selection.threadId!==task.threadId||selection.taskId!==task.id||selection.projectId!==task.authoring?.projectId||selection.environmentId!==task.authoring?.environmentId||selection.inputRoot!==task.authoring?.inputRoot||!Number.isSafeInteger(selection.serial)||!worker.connection)throw Error('Select this same workflow in its connected original authoring context');return {task,selection,verification,connection:worker.connection,state:clone(worker.connection)};}
  function guard(o){const n=owner(o.task.id,o.verification);if(!equal(o.task,n.task)||!equal(o.selection,n.selection)||o.connection!==n.connection||!equal(o.state,n.state))throw Error('Target workflow, selected config, owner, revision or worker changed');}
  async function call(o,method,url,args){guard(o);const v=await worker.request(method,url,args);guard(o);return v;}
- async function observed(o,actual=false){const checked=await (actual?scienceService.verifyActual(o.task.id):scienceService.verify(o.task.id));guard(o);const science={...checked.data,closureSha:checked.receipt.closureSha,authority:checked.authority};if(!['local-human','input-observation'].includes(science.authority?.kind)||science.engine!==o.task.parameters.engine)throw Error('Independent current scientific input receipt required before choosing a target');const config=validDeployment(o.task.deployment?.config),projects=await call(o,'GET','/api/projects');if(!Array.isArray(projects)||projects.length>4096)throw Error('Actual current project catalog unavailable');const project=projects.find(p=>p.id===config.projectId);if(projects.filter(p=>p.id===config.projectId).length!==1)throw Error('Select exactly one registered target project');const runtime=await call(o,'POST','/api/runtime-guide',{environment_id:config.targetId,engine:science.engine});const scope=consumerTargetScope({task:o.task,science,config,project,runtime});guard(o);return {science,config,project,runtime,scope};}
- function stored(task){const r=task.localTargetReview?.receiptId?receiptStore.get(task.localTargetReview.receiptId):null;return task.localTargetReview?.status==='confirmed'&&r?.kind==='local-human-consumer-target-v1'&&r.taskId===task.id&&r.provider===task.provider&&r.threadId===task.threadId&&r.fingerprint===reviewFingerprint(task)&&r.deploymentRevision===task.deployment?.revision&&equal(r.scope.config,task.deployment?.config)?r:null;}
+ async function observed(o,actual=false){
+  const checked=await (actual?scienceService.verifyActual(o.task.id):scienceService.verify(o.task.id));guard(o);
+  const science={...checked.data,closureSha:checked.receipt.closureSha,authority:checked.authority};
+  if(!['local-human','input-observation'].includes(science.authority?.kind)||science.engine!==o.task.parameters.engine)throw Error('Independent current scientific input receipt required before choosing a target');
+  const config=validDeployment(o.task.deployment?.config);
+  let project;
+  if(config.projectId){
+   const projects=await call(o,'GET','/api/projects');
+   if(!Array.isArray(projects)||projects.length>4096)throw Error('Actual current project catalog unavailable');
+   const matches=projects.filter(p=>p.id===config.projectId);
+   if(matches.length!==1)throw Error('Select exactly one registered target project');
+   [project]=matches;
+  }else{
+   const description=await describeWorkflowDeploymentScope(worker,o.task,config,{engines:[science.engine],localInputs:Object.values(scientificSpec(o.task).inputs)},()=>guard(o));
+   config.projectId=description.id;
+   if(actual){
+    project=await call(o,'POST','/api/desktop/deployment-scope/read',{project_id:description.id});
+    if(!equal(project,description))throw Error('The prepared conversation deployment scope has changed');
+   }else project=description;
+  }
+  const runtime=await call(o,'POST','/api/runtime-guide',{environment_id:config.targetId,engine:science.engine});
+  const scope=consumerTargetScope({task:o.task,science,config,project,runtime});guard(o);
+  return {science,config,project,runtime,scope};
+ }
+ function stored(task){const r=task.localTargetReview?.receiptId?receiptStore.get(task.localTargetReview.receiptId):null;return task.localTargetReview?.status==='confirmed'&&r?.kind==='local-human-consumer-target-v1'&&r.taskId===task.id&&r.provider===task.provider&&r.threadId===task.threadId&&r.fingerprint===reviewFingerprint(task)&&r.deploymentRevision===task.deployment?.revision&&equal({...r.scope.config,projectId:task.deployment?.config?.projectId},task.deployment?.config)?r:null;}
  async function inspect(v,e){request(v,['taskId']);human(e);const o=owner(v.taskId),epoch=(epochs.get(v.taskId)||0)+1;remember(epochs,v.taskId,epoch,{max:256});const data=await observed(o);guard(o);human(e);if(epochs.get(v.taskId)!==epoch)throw Error('A newer target inspection superseded this response');const challengeId=uuid();remember(challenges,challengeId,{o,data,epoch,used:false},{max:64});return {taskId:v.taskId,challengeId,scope:clone(data.scope),entries:data.science.entries.map(({text,...item})=>item),status:'prepared_for_human_confirmation',scientificValidation:'not_run'};}
  async function confirmTarget(v,e){request(v,['taskId','challengeId']);human(e);const c=challenges.get(v.challengeId);if(!c||c.used||c.o.task.id!==v.taskId||epochs.get(v.taskId)!==c.epoch)throw Error('Target challenge is stale, forged or consumed');c.used=true;guard(c.o);const before=await observed(c.o);if(!equal(before.scope,c.data.scope))throw Error('Target policy, scientific receipt or runtime changed before native confirmation');human(e);const accepted=await confirm({kind:'consumer-target-native-scope-v1',taskId:v.taskId,scope:clone(before.scope),files:before.science.entries.map(({text,...item})=>item),warning:'Target registration and saved input identity only; serialized CUDA ABI/force/virial validation and separate human execution remain required'},e);guard(c.o);human(e);if(accepted!==true)return {taskId:v.taskId,status:'cancelled'};const after=await observed(c.o);if(!equal(after.scope,c.data.scope))throw Error('Target policy, scientific receipt or runtime changed during native confirmation');guard(c.o);human(e);const receipt={kind:'local-human-consumer-target-v1',id:uuid(),taskId:v.taskId,provider:c.o.task.provider,threadId:c.o.task.threadId,fingerprint:reviewFingerprint(c.o.task),deploymentRevision:c.o.task.deployment.revision,scope:clone(after.scope),confirmedAt:now(),scientificValidation:'not_run'};receiptStore.put(receipt.id,clone(receipt));const task=records.read(v.taskId);task.localTargetReview={status:'confirmed',receiptId:receipt.id,kind:receipt.kind,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment.revision};if(task.deployment){delete task.deployment.prepared;delete task.deployment.request;}records.save(task);return {taskId:v.taskId,status:'confirmed',receipt:{id:receipt.id,scope:clone(receipt.scope),confirmedAt:receipt.confirmedAt,scientificValidation:'not_run'}};}
  async function verify(taskId){const o=owner(taskId,true),receipt=stored(o.task);if(!receipt)throw Error('Confirm this saved consumer target separately after human scientific input review');const data=await observed(o);if(!equal(data.scope,receipt.scope))throw Error('Current consumer target, policy, runtime or scientific receipt changed; reconfirm explicitly');guard(o);return {...data,receipt:clone(receipt)};}

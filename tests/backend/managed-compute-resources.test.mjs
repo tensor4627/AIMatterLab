@@ -95,6 +95,27 @@ function fixture(t,options={}){
   pauseOpen(){openGate=deferred();return openGate;},time:value=>{now=value;}};
 }
 
+test('a missing SSH capability grant is confirmed in the conversation before opening a scoped shell',async t=>{
+ const requested=deferred(),decision=deferred();let denied=false;
+ const workspace={resourceId:'fixed-resource',workspaceId:'fixed-workspace',root:'/work',account:'fixture',hostIdentity:{hostname:'fixture'}};
+ const f=fixture(t,{authorizeTerminal:()=>denied?'denied':false,
+  terminalAuthorization:{input:async()=>({accepted:true})},resourceWorkspace:{assertHandoff:async()=>workspace,
+   publicWorkspace:value=>value,resolveHostedResourceWorkspace:()=>workspace},
+  requestTerminalApproval(scope,resource,access){requested.resolve({scope,resource,access});return decision.promise;}});
+ await f.publish('A');
+ f.turn(f.owner,'使用材料中心');
+ const operation=f.manager.acquire(f.owner,{resourceId:'ssh:A',access:'terminal'});
+ const {scope,resource,access}=await requested.promise;
+ assert.equal(scope.threadId,f.owner.threadId);assert.equal(resource.resourceId,'ssh:A');assert.equal(resource.workspace.root,'/work');
+ assert.equal(access,'terminal');assert.equal(f.calls.length,0);
+ decision.resolve(true);
+ assert.equal((await operation).status,'acquired');
+ assert.equal(f.calls.filter(call=>call.op==='open').length,1);
+ denied=true;
+ await assert.rejects(f.manager.acquire(f.owner,{resourceId:'ssh:A',access:'terminal'}),/grant_required/);
+ assert.equal(f.calls.filter(call=>call.op==='open').length,1);
+});
+
 test('publication retains independent hosts and grants exactly one distinct PTY per provider, conversation and resource',async t=>{
  const f=fixture(t),{manager,owner}=f;
  f.states.get('conn-A').authentication='pending';
@@ -859,7 +880,7 @@ test('hosted reuse reports manifest differences before an explicit in-place serv
 
 test('run mutations check exact source, active project grant, user intent and known canonical state before dispatch',async t=>{
  const dispatched=[],runStates=new Map(),f=fixture(t),held=deferred(),entered=deferred();
- let authorized=false,monitorAvailable=true,authenticated=false;
+ let authorized=false,monitorAvailable=true,authenticated=false,approve;
  const workerBinding={kind:'ssh',root:'/fixture/worker',hostIdentity:{hostname:'fixture',uid:100,machineId:'fixture'}};
  const services={async ssh(resource){
   const id=resource.profileId,clusterId='cluster-'+id,cluster={id:clusterId,version:1,transport_kind:'ssh-service-local'};
@@ -887,7 +908,11 @@ test('run mutations check exact source, active project grant, user intent and kn
     assert.fail('Unexpected route '+target);
    }};
  }};
- const manager=f.make({services,authorizeRun:(_scope,ref)=>ref.runId.endsWith(ref.resourceId.at(-1)),authorizeRunAction:()=>authorized});
+ const manager=f.make({services,authorizeRun:(_scope,ref)=>ref.runId.endsWith(ref.resourceId.at(-1)),authorizeRunAction:()=>authorized,
+  requestRunApproval:(scope,ref,run)=>{
+   if(!approve)throw Error('managed_compute_run_intent_required');
+   return approve(scope,ref,run);
+  }});
  t.after(()=>manager.stop());
  await Promise.all(['A','B'].map(id=>f.publish(id,'conn-'+id,manager)));
  await Promise.all(['A','B'].map(id=>manager.refreshService({connectionId:'conn-'+id})));
@@ -928,6 +953,19 @@ test('run mutations check exact source, active project grant, user intent and kn
   managed_monitor:{schemaVersion:1,sourceId:'worker-A',scope:{provider:f.owner.provider,threadId:f.owner.threadId,taskId:f.owner.taskId,projectId:f.owner.projectId,runId}}})));
  assert.deepEqual(dispatched.map(({resource,name,arguments:args})=>[resource,name,args.require_known??false]),
   [['A','validate_cluster_run',false],['A','submit_cluster_run',false],['A','cancel_cluster_run',true],['A','submit_cluster_run',false],['A','submit_cluster_run',false],['A','submit_cluster_run',false]]);
+ const waiting=deferred(),answer=deferred();
+ const run={id:'run-approval-A',project_id:'project',cluster_id:'cluster-A',status:'draft',script:'original'};
+ runStates.set(run.id,run);authorized=false;
+ approve=(scope,ref,observed)=>{waiting.resolve({scope,ref,observed});return answer.promise;};
+ const rejected=assert.rejects(mutation('A','validate_cluster_run',run.id),/state_unconfirmed/);
+ const request=await waiting.promise;
+ assert.equal(request.scope.threadId,f.owner.threadId);assert.equal(request.ref.sourceId,'worker-A');assert.deepEqual(request.observed,run);
+ assert.equal(dispatched.length,6);
+ run.script='changed';answer.resolve(()=>true);await rejected;
+ assert.equal(dispatched.length,6);
+ approve=()=>()=>true;
+ assert.equal((await mutation('A','validate_cluster_run',run.id)).status,200);
+ assert.equal(dispatched.at(-1).arguments.run_id,run.id);
 });
 test('a saved display name containing example remains selectable in a concrete queue request',()=>{
  assert.equal(requestsComputeName('查示例甲的队列','示例甲'),true);

@@ -79,6 +79,21 @@ test('schedule discussion grants nothing and a mixed affirmative request delegat
  }
 });
 
+test('an operation needing confirmation is distinct from an explicit instruction to stop or hold',()=>{
+ const schedule=createScheduleDelegations(storage()),run=createRunActionIntents();
+ const ref={action:'submit',runId:'run-a',resourceId:'ssh:host',sourceId:'original'};
+ const speak=(text,turnId)=>{schedule.record({...one,text,turnId});run.record({...one,text,turnId});};
+ speak('Check the current run.','ambiguous');
+ assert.equal(schedule.confirmationTurn(one,'upsert',{kind:'poll'}),'ambiguous');
+ assert.equal(run.confirmationTurn(one,ref),'ambiguous');
+ speak('Do not submit the run. Do not run a monitoring script.','excluded');
+ assert.equal(schedule.confirmationTurn(one,'upsert',{kind:'script'}),undefined);
+ assert.equal(run.confirmationTurn(one,ref),undefined);
+ speak('Wait for my approval before you submit the run.','hold');
+ assert.equal(run.permits(one,'submit',ref.runId,[ref],undefined,ref),false);
+ assert.equal(run.confirmationTurn(one,ref),'hold');
+});
+
 test('later schedule restrictions revoke only their purposes and explicit stop requires a direct request',()=>{
  const grants=createScheduleDelegations(storage());
  const put=(text,turnId,scope=one)=>grants.record({...scope,text,turnId});

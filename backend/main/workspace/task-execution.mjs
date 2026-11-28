@@ -1,4 +1,4 @@
-import {snapshotIdentity,deploymentCurrent} from '../../../contracts/compute/deployment.mjs';
+import {snapshotIdentity,deploymentCurrent,preparedProjectId} from '../../../contracts/compute/deployment.mjs';
 import {assertDeploymentWorker,assertConfirmedDeployment} from './deployment-state.mjs';
 import {taskOperation} from './task-operations.mjs';
 import {isDeepStrictEqual} from 'node:util';
@@ -33,7 +33,8 @@ async function executeOnce(records,worker,{taskId,artifactId,inputReceipt,runChe
   const assertWorker=()=>{if(connection&&(worker.connection!==connection||worker.connectionEpoch!==connectionEpoch))throw Error('作业服务连接已变化。');assertDeploymentWorker(task,worker);assertDeploymentWorker(records.read(taskId),worker);if(observationOwner&&sameDraft())localReview.assertOperation(observationOwner);};
   const current=await worker.request('POST',prefix+'status',{run_id:artifact.id});assertWorker();
   if(task.workflowVersion===2&&inputReceipt!==snapshotIdentity(task,current))throw Error('Prepared input snapshot identity changed');
-  const matchesRun=run=>run?.id===artifact.id&&run.project_id===(task.workflowVersion===2?task.deployment.config.projectId:task.projectId)&&
+  const projectId=task.workflowVersion===2?preparedProjectId(task):task.projectId;
+  const matchesRun=run=>run?.id===artifact.id&&run.project_id===projectId&&
    (artifact.kind==='cluster-run'?run.kind==='cluster-run':run.kind!=='cluster-run');
   if(!matchesRun(current))throw Error('Run identity does not match the workflow deployment');
   if(!['draft','ready'].includes(current.status)){records.linkRun(taskId,current);return current;}
@@ -41,13 +42,14 @@ async function executeOnce(records,worker,{taskId,artifactId,inputReceipt,runChe
   if(pending.execution&&['validating','submitting','unknown'].includes(pending.execution.phase))throw Error('An execution request is pending; reconcile its recorded run, never resubmit unknown');
   attempt={artifactId,artifactKind:artifact.kind,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment?.revision,inputIdentity:inputReceipt,runChecks};
   pending.execution={...attempt,phase:'validating'};records.save(pending);
-  if(observesInputs&&sameDraft()){await localReview.verifyPreparedActual(taskId,current,task.deployment.config,current.inputs,true);assertWorker();}
+  const config={...task.deployment?.config,projectId};
+  if(observesInputs&&sameDraft()){await localReview.verifyPreparedActual(taskId,current,config,current.inputs,true);assertWorker();}
   // Checks are evidence. The worker independently enforces authorization,
   // immutable inputs and mandatory serialized-artifact/target compatibility.
   const checked=runChecks?await worker.request('POST',prefix+'validate',{run_id:artifact.id}):current;assertWorker();
   const actual=observesInputs&&sameDraft()?await worker.request('POST',prefix+'status',{run_id:artifact.id}):checked?.id?checked:current;assertWorker();
   if(!['draft','ready'].includes(actual.status)||!isDeepStrictEqual(immutableRun(current),immutableRun(actual)))throw Error('Prepared execution identity changed during validation');
-  if(observesInputs&&sameDraft()){await localReview.verifyPreparedActual(taskId,actual,task.deployment.config,actual.inputs,true);assertWorker();}
+  if(observesInputs&&sameDraft()){await localReview.verifyPreparedActual(taskId,actual,config,actual.inputs,true);assertWorker();}
   const fresh=records.read(taskId);fresh.execution={...attempt,phase:'submitting'};records.save(fresh);
   // Older workers may only return the authentication code. Verify their exact draft before clearing that attempt.
   if(artifact.kind==='cluster-run'&&Number.isInteger(connectionEpoch)&&typeof current.nonce==='string'&&current.nonce)proveNotSubmitted=async()=>{

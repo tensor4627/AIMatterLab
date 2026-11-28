@@ -62,11 +62,11 @@ function namedChoices(source,candidates,aliases) {
  return {named:exact.length?exact:[...named.values()],ambiguous:exact.length?[]:[...ambiguous.values()],excluded};
 }
 
-export function canAskForResource(message,discovered) {
+export function canAskForResource(message,discovered,{offerResourcePicker=false}={}) {
  // This branch only offers eligible targets for a human decision. Opening a
  // shell or using a service still requires a selected target and its policy.
  return !cancelSelection.test(message)&&clauses(message).some(part=>!negativeQuery.test(part)&&!exampleWording.test(part)&&
-  (operations.test(part)||discovered&&continuation.test(part)));
+  (offerResourcePicker&&!!part.trim()||operations.test(part)||discovered&&continuation.test(part)));
 }
 
 function requestedObservation(message,value) {
@@ -193,9 +193,9 @@ export function createManagedComputeIntent(catalog){
   return record?.projectId===(scope.projectId??null)&&Array.isArray(record.targets)&&record.targets.some(target=>
    sameTarget(target,resource)&&(!workspaceId||target.workspaceId===workspaceId)&&Array.isArray(target.chatAccess)&&target.chatAccess.includes(access))===true;
  }
- function recordChatChannel(scope,resource,access){
+ function recordChatChannel(scope,resource,access,{confirmed=false}={}){
   const key=computeScopeKey(scope),turn=current(scope);
-  if(!turn||turn.taskId!==null||scope.taskId||turn.projectId!==(scope.projectId??null))return;
+  if(!turn||turn.projectId!==(scope.projectId??null)||turn.taskId!==(scope.taskId??null)||!confirmed&&scope.taskId)return;
   const previous=savedTargets(key,turn),old=previous.find(target=>sameTarget(target,resource));
   const workspaceId=resource.workspaceRegistration?.workspaceId,oldAccess=!workspaceId||old?.workspaceId===workspaceId?old?.chatAccess:undefined;
   if(oldAccess?.includes(access))return;

@@ -27,9 +27,9 @@ const definitions=[
  },['resource_id','kind','spec'])),
  tool('read_compute_run_status','Observe one run linked to this conversation or its workflow on the acquired service.',schema(runRef,['resource_id','run_id']),true),
  tool('read_compute_run_log','Read a bounded log from one run linked to this conversation or its workflow on the acquired service.',schema({...runRef,name:{enum:['console.log','queue.out','queue.err']},offset:finiteInteger(0,Number.MAX_SAFE_INTEGER)},['resource_id','run_id','name']),true),
- tool('validate_compute_run','Validate one linked immutable run on its original acquired service when the user explicitly requests a check.',schema(runRef,['resource_id','run_id'])),
- tool('submit_compute_run','Submit one linked draft on its original acquired service when the user explicitly requests execution. For a new independent job, use the exact draft prepared for this user turn. Observe the original run after an uncertain response.',schema(runRef,['resource_id','run_id'])),
- {...tool('cancel_compute_run','Request cancellation of one linked run on its original acquired service when the user explicitly requests cancellation. Read status to confirm the result.',schema(runRef,['resource_id','run_id'])),annotations:{readOnlyHint:false,destructiveHint:true}},
+ tool('validate_compute_run','Validate one linked immutable run on its original acquired service. AIMatterLab asks for confirmation when the current delegation needs it.',schema(runRef,['resource_id','run_id'])),
+ tool('submit_compute_run','Submit one linked draft on its original acquired service. For a new independent job, use the exact draft prepared for this user turn. AIMatterLab asks for confirmation when needed. Observe the original run after an uncertain response.',schema(runRef,['resource_id','run_id'])),
+ {...tool('cancel_compute_run','Request cancellation of one linked run on its original acquired service. AIMatterLab asks for confirmation when needed. Read status to confirm the result.',schema(runRef,['resource_id','run_id'])),annotations:{readOnlyHint:false,destructiveHint:true}},
  tool('list_task_schedules','List schedules owned by this conversation or its workflow on the acquired service.',schema({resource_id:id},['resource_id']),true),
  tool('task_schedule_status','Read the status of one schedule owned by this conversation or its workflow.',schema(scheduleRef,['resource_id','schedule_id']),true),
  tool('stop_task_schedule','Stop future occurrences of one schedule owned by this conversation or its workflow.',schema(scheduleRef,['resource_id','schedule_id'])),
@@ -77,7 +77,7 @@ function requiresWorkflowReview(task,runId){
 }
 
 /** The model selects an acquired resource and operation. Main supplies every owner and worker identity. */
-export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,assertRunIntent,assertRunSource,captureRunPreparation,onRunObserved=()=>{},requestResourceChoice}){
+export function createManagedComputeTools({resources,schedules,assertWorkflow,authorizeTask=async()=>{},assertScheduleIntent,requestScheduleApproval,assertRunIntent,assertRunSource,captureRunPreparation,onRunObserved=()=>{},requestResourceChoice}){
  function scheduleIntent(scope,operation,args){
   try{
    const delegation=assertScheduleIntent?.(scope,operation,args);
@@ -120,9 +120,9 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   if(!Object.entries(inputs).every(([name,file])=>relative(name)&&relative(file)&&selected.has(file)))throw Error('Run inputs must be selected or generated for this exact workflow');
   return inputs;
  }
- async function callWorker(scope,resourceId,assertCurrent,name,args,dispatch){
+ async function callWorker(scope,resourceId,assertCurrent,name,args,dispatch,signal){
   const rpcId='managed-run-operation',data={jsonrpc:'2.0',id:rpcId,method:'tools/call',params:{name,arguments:args}};
-  const response=await resources.serviceRequest(scope,{resourceId,method:'POST',target:'/mcp',mcp:true,data,timeoutMs:20000,checkCurrent:assertCurrent,onDispatch:dispatch});
+  const response=await resources.serviceRequest(scope,{resourceId,method:'POST',target:'/mcp',mcp:true,data,timeoutMs:20000,checkCurrent:assertCurrent,onDispatch:dispatch,...signal?{signal}:{}});
   assertCurrent();
   const failure=workerRunOperationFailure(response,rpcId);
   if(failure)throw Object.assign(Error(failure.message),{workerFailure:failure});
@@ -133,17 +133,17 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
  }
  async function call(name,args,scope,{signal}={}){
   if(resources.owns(name)){
-   const receipt=await resources.callTool(name,args,scope);
+   const receipt=await resources.callTool(name,args,scope,{signal});
    if(name!=='acquire_compute_resource'||receipt.status!=='choice_required'||!requestResourceChoice)return receipt;
    const confirm=resources.bindComputeChoice(scope,receipt.candidates.map(candidate=>candidate.resourceId));
    return requestResourceChoice(scope,receipt,{access:args.access,signal,confirm});
   }
   const operation={dispatched:false,readOnly:readOnlyTools.has(name),run:null};
-  try{return await perform(name,args,scope,operation);}catch(error){
+  try{return await perform(name,args,scope,operation,signal);}catch(error){
    throw Object.assign(error,{operationDispatched:operation.dispatched,readOnlyOperation:operation.readOnly,...operation.run});
   }
  }
- async function perform(name,args,scope,operation){
+ async function perform(name,args,scope,operation,signal){
   const shape=byName.get(name);
   if(!shape||!valid(args,shape))throw deny('Invalid managed compute tool arguments');
   const dispatch=()=>{operation.dispatched=true;};
@@ -196,7 +196,7 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
    checkOperation();
    let value;
    try{
-    value=await callWorker(scope,resourceId,checkOperation,runAction+(kind==='cluster-run'?'_cluster_run':'_run'),{run_id:runId},dispatch);
+    value=await callWorker(scope,resourceId,checkOperation,runAction+(kind==='cluster-run'?'_cluster_run':'_run'),{run_id:runId},dispatch,signal);
    }catch(error){
     if(runAction==='submit'&&kind==='cluster-run')void schedules.refresh?.(sourceId).catch(()=>{});
     throw error;
@@ -217,9 +217,18 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
    if(result?.status!==200)throw Error('The original service did not confirm the schedule request');
    return result.data;
   }});
-  const recheck=(action,selection,turn)=>()=>{
-   if(scheduleIntent(scope,action,selection)!==turn)throw deny('managed_schedule_task_delegation_required');
-  };
+  async function confirmSchedule(action,selection,details){
+   let intent;
+   try{intent=scheduleIntent(scope,action,selection);}catch(error){
+    if(error.message!=='managed_schedule_task_delegation_required'||!requestScheduleApproval)throw error;
+    const approval=await requestScheduleApproval(scope,action,selection,details,{signal});
+    assertCurrent();
+    return approval;
+   }
+   return {intent,assert(){
+    if(scheduleIntent(scope,action,selection)!==intent)throw deny('managed_schedule_task_delegation_required');
+   }};
+  }
   if(name==='list_task_schedules')return {schedules:current()};
   if(!service.supportsManagedSchedules)throw deny('managed_compute_worker_update_required');
   if(name==='task_schedule_status'||name==='stop_task_schedule'){
@@ -227,8 +236,8 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
    if(!item)throw Error('This schedule is not registered to this conversation on the original service');
    if(item.scope.runId)anchor(item.scope.runId);
    const stopping=name==='stop_task_schedule';
-   const confirm=stopping?recheck('stop',args,scheduleIntent(scope,'stop',args)):undefined;
-   const result=await schedules[stopping?'stop':'status']({sourceId,scheduleId},operationFor(confirm));
+   const approval=stopping?await confirmSchedule('stop',args,{schedule_id:scheduleId,name:item.name,kind:item.kind,run_id:item.scope.runId}):null;
+   const result=await schedules[stopping?'stop':'status']({sourceId,scheduleId},operationFor(approval?.assert));
    assertCurrent();return result;
   }
   const {kind,key:requestedKey,name:displayName,mutation_id:mutationId,expected_revision:expectedRevision,interval_seconds:intervalSeconds,max_runs:maxRuns,expires_at:expiresAt,timeout_seconds:timeoutSeconds,action,script,wake_text:wakeText}=args;
@@ -238,9 +247,11 @@ export function createManagedComputeTools({resources,schedules,assertWorkflow,au
   if(kind!=='wake_agent'||targetRun)anchor(targetRun);
   if(!editing&&(kind==='wake_agent'&&!wakeText||kind==='action'&&!action||kind==='script'&&(!script||!key)))throw Error('Schedule payload does not match the selected operation');
   const effectiveIntent=kind==='action'&&action===undefined&&previous?{...args,action:previous.action}:args;
-  const intent=scheduleIntent(scope,'upsert',effectiveIntent),delegationId=previous?previous.delegationId:intent;
+  const {resource_id:_resource,mutation_id:_mutation,...details}=effectiveIntent;
+  const approval=await confirmSchedule('upsert',effectiveIntent,{...details,run_id:targetRun});
+  const delegationId=previous?previous.delegationId:approval.intent;
   const request=Object.fromEntries(Object.entries({sourceId,scope:{...owner,runId:targetRun},kind,key,name:displayName,mutationId,expectedRevision,intervalSeconds,maxRuns,expiresAt,timeoutSeconds,action,script,wakeText,delegationId}).filter(([,value])=>value!==undefined));
-  const result=await schedules.upsert(request,operationFor(recheck('upsert',effectiveIntent,intent)));
+  const result=await schedules.upsert(request,operationFor(approval.assert));
   assertCurrent();return result;
  }
  return {tools:()=>[...resources.tools(),...definitions],owns:name=>resources.owns(name)||byName.has(name),call};

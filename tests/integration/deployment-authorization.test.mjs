@@ -5,6 +5,7 @@ import {validDeployment} from "../../contracts/compute/deployment.mjs";
 
 import {TaskRecords} from "../../agent/sessions/task-records.mjs";
 import {saveDeployment,prepareDeployment} from "../../backend/main/workspace/task-deployment.mjs";
+import {executeTask} from '../../backend/main/workspace/task-execution.mjs';
 
 const config={target:'local',projectId:'compute',targetId:'gpu-env',gpu:0,maxSeconds:300,inputSource:'local',directoryName:'short',resources:{cpus:1,gpus:1,memory_mb:4096,queue:'',account:''}};
 const project={id:'compute',name:'Compute',policy:{engines:['gpumd.md','pygas.build'],environments:['gpu-env'],clusters:['cluster'],gpus:[0],max_seconds:3600,max_concurrent:1,input_roots:['/inputs']}};
@@ -15,6 +16,50 @@ function fixture(){
  task.parameters={engine:'gpumd.md',files:['/inputs/run.in','/inputs/model.xyz']};task.review={status:'ready',parameterRevision:task.parameterRevision};records.save(task);saveDeployment(records,{taskId:task.id,value:config});
  return {records,task};
 }
+
+test('A workflow with no compute project prepares and executes on its selected resource in its own scope',async()=>{
+ const {records,task}=fixture(),requests=[];
+ const next=records.read(task.id);next.parameters.files.push('/other/trajectory.xyz');records.save(next);
+ let project,run;
+ const worker={connection:{health:{root:'/worker'}},identity:{distribution:'fixture',root:'/worker'},request:async(method,route,data)=>{
+  requests.push([method,route]);
+  if(route==='/api/environments')return [{id:'gpu-env'}];
+  if(route==='/api/projects'){assert.equal(method,'POST');project=data;return project;}
+  if(route==='/api/authoring/adopt'){assert.equal(data.target_project_id,project.id);return {paths:{}};}
+  if(route==='/api/runs/prepare'){assert.equal(data.spec.project_id,project.id);run={id:'new-run',project_id:project.id,status:'draft',engine:'gpumd.md',snapshots:[]};return run;}
+  if(route==='/api/run/status')return run;
+  if(route==='/api/run/submit')return {...run,status:'running'};
+  throw Error(route);
+ }};
+ saveDeployment(records,{taskId:task.id,value:{...config,projectId:''}},null,worker);
+ assert.deepEqual(requests,[]);
+ const prepared=await prepareDeployment(records,worker,{taskId:task.id});
+ const saved=records.read(task.id);
+ assert.equal(saved.deployment.config.projectId,'');
+ assert.equal(saved.authoring.projectId,'draft');
+ assert.equal(saved.deployment.prepared.projectId,project.id);
+ assert.deepEqual(project.policy.environments,['gpu-env']);
+ assert.deepEqual(project.policy.engines,['gpumd.md']);
+ assert(project.policy.input_roots.includes('/other/trajectory.xyz'));
+ assert.equal(project.conversation_scope.workflow,task.id);
+ const sibling=records.create({workflowVersion:2,planningMode:true,provider:'codex',threadId:'other-thread',request:'Other conversation'});
+ assert.throws(()=>records.linkRun(sibling.id,prepared),/does not match/);
+ const result=await executeTask(records,worker,{taskId:task.id,artifactId:prepared.id,inputReceipt:saved.deployment.prepared.inputIdentity});
+ assert.equal(result.status,'running');
+ assert.equal(records.read(task.id).execution.status,'running');
+});
+
+test('A replaced resource catalog cannot create a deployment scope for a stale conversation',async()=>{
+ const {records,task}=fixture(),calls=[];
+ const worker={connection:{},identity:{distribution:'fixture',root:'/worker'},request:async(method,route)=>{
+  calls.push([method,route]);
+  const next=records.read(task.id);next.threadId='other-thread';records.save(next);
+  return [{id:'gpu-env'}];
+ }};
+ saveDeployment(records,{taskId:task.id,value:{...config,projectId:''}},null,worker);
+ await assert.rejects(prepareDeployment(records,worker,{taskId:task.id}),/部署已修改/);
+ assert.deepEqual(calls,[['GET','/api/environments']]);
+});
 
 test('Draft workspaces are never compute projects, even with permissive legacy fields',()=>{
  assert.equal(deploymentProjectIssue({...project,authoring_only:true},config,'gpumd.md').code,'compute-project-required');

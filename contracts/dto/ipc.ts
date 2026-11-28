@@ -3,6 +3,7 @@ import type {Conversation} from './agent';
 import type {ConversationAnchor,ConversationHistoryPage,ConversationHistoryItem,ConversationHistorySearchRequest,ConversationHistorySearchResult,ConversationBookmark,ConversationBranchResult} from './conversation-history';
 import type {AgentQueueRequest,AgentQueueResult} from './agent-queue';
 import type {ConversationActivity,ConversationReadReceipt} from './conversation-activity';
+import type {ConversationApproval,ConversationApprovalOwner} from './conversation-approvals';
 import type {ChatEvidenceDifference,ChatEvidenceRequest,ChatEvidenceStageRequest} from './chat-evidence';
 import type {ResourceWorkspaceReference,ManagedSshServiceStatus,ManagedSshServiceUpdateRequest,SshServiceState,SharedTerminalOwnerRequest,SharedTerminalOwnerResult} from './compute';
 import type {UpdateAccess,UpdateSource,UpdateState} from './update';
@@ -35,6 +36,8 @@ export interface StudioIpcMap {
  'agent.queue':Route<AgentQueueRequest,AgentQueueResult>;
  'conversation.activity.list':Route<Record<string,never>,ConversationActivity[]>;
  'conversation.activity.markRead':Route<ConversationReadReceipt,{acknowledged:boolean}>;
+ 'conversation.approvals':Route<ConversationApprovalOwner,ConversationApproval[]>;
+ 'conversation.revokeApproval':Route<ConversationApprovalOwner & {id:string},ConversationApproval[]>;
  'chat.evidence.stage':Route<ChatEvidenceStageRequest,import('./chat-attachments').ChatAttachmentRef[]>;
  'chat.evidence.compare':Route<ChatEvidenceRequest,ChatEvidenceDifference|null>;
  'chat.evidence.remember':Route<ChatEvidenceRequest,{revision:string}>;

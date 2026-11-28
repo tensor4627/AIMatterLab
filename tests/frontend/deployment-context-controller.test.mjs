@@ -7,7 +7,7 @@ import {deferred} from "../helpers/agent-hooks.mjs";
 const reads=h=>h.calls.filter(call=>call.method==='task.deployment.context');
 const writes=h=>h.calls.filter(call=>['task.deployment.draft','task.deployment.save','task.deployment.prepare','task.execute','worker.connect','compute.connection.connect','agent.rpc'].includes(call.method));
 const state=h=>h.find(node=>node.props?.['data-testid']==='deployment-context-state');
-const binding=h=>h.text(h.find(node=>node.props?.['data-testid']==='deployment-binding'));
+const choices=h=>h.text(h.find(node=>node.type==='select'&&node.props?.['aria-label']==='部署环境'));
 const retry=h=>h.find(node=>node.type==='button'&&h.text(node)==='重新读取');
 const execute=h=>h.find(node=>node.props?.['data-testid']==='execute-deployment');
 
@@ -17,13 +17,13 @@ test('human SSH scheduler save event refreshes only the current trusted deployme
 });
 
 test('production context hook keeps wrong-task data out of the active deployment and execution gates',async()=>{
- const h=deploymentHarness({override:async(method,data,standard)=>{const value=await standard(method,data);return method==='task.deployment.context'?{...value,taskId:'wrong-task',projects:value.projects.map(project=>({...project,name:'Wrong-scope project'}))}:value;}});
- await h.flush();assert(h.text(state(h)).includes('正在恢复'));assert(binding(h).includes('Compute project'));assert(!binding(h).includes('Wrong-scope'));assert.equal(execute(h).props.disabled,true);assert.equal(reads(h).length,1);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();
+ const h=deploymentHarness({override:async(method,data,standard)=>{const value=await standard(method,data);return method==='task.deployment.context'?{...value,taskId:'wrong-task',environments:value.environments.map(environment=>({...environment,name:'Wrong-scope resource'}))}:value;}});
+ await h.flush();assert(h.text(state(h)).includes('正在读取'));assert(choices(h).includes('Research environment A'));assert(!choices(h).includes('Wrong-scope'));assert.equal(execute(h).props.disabled,true);assert.equal(reads(h).length,1);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();
 });
 
 test('manual context reread supersedes a pending read without a late failure replacing the ready catalog',async()=>{
  const pending=deferred();let count=0;const h=deploymentHarness({override:(method,data,standard)=>method==='task.deployment.context'&&++count===1?pending.promise:standard(method,data)});
- await h.flush();retry(h).props.onClick();await h.flush();assert(binding(h).includes('Compute project'));pending.reject(Error('old context read failed'));await h.flush();assert.throws(()=>state(h),/not found/);assert.equal(reads(h).length,2);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();
+ await h.flush();retry(h).props.onClick();await h.flush();assert(choices(h).includes('Research environment A'));pending.reject(Error('old context read failed'));await h.flush();assert.throws(()=>state(h),/not found/);assert.equal(reads(h).length,2);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();
 });
 
 test('late context success after a worker gate closes cannot release deployment controls',async()=>{
@@ -32,8 +32,8 @@ test('late context success after a worker gate closes cannot release deployment 
 });
 
 test('late old-task context success cannot replace the new task catalog or user science parameters',async()=>{
- const pending=deferred();let old;const h=deploymentHarness({override:async(method,data,standard)=>{const value=await standard(method,data);if(method==='task.deployment.context'&&data.taskId==='workflow-A'){old={...value,projects:value.projects.map(project=>({...project,name:'Obsolete task A project'}))};return pending.promise;}return value;}});
- await h.flush();const next=deploymentFixture('workflow-B');next.task.parameters.md={temperature:310};h.setTask(next.task,next.run);await h.flush();assert(binding(h).includes('Compute project'));pending.resolve(old);await h.flush();assert(!binding(h).includes('Obsolete'));assert.equal(h.props.task.id,'workflow-B');assert.equal(h.props.task.parameters.md.temperature,310);assert.equal(reads(h).length,2);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();
+ const pending=deferred();let old;const h=deploymentHarness({override:async(method,data,standard)=>{const value=await standard(method,data);if(method==='task.deployment.context'&&data.taskId==='workflow-A'){old={...value,environments:value.environments.map(environment=>({...environment,name:'Obsolete task A resource'}))};return pending.promise;}return value;}});
+ await h.flush();const next=deploymentFixture('workflow-B');next.task.parameters.md={temperature:310};h.setTask(next.task,next.run);await h.flush();assert(choices(h).includes('Research environment A'));pending.resolve(old);await h.flush();assert(!choices(h).includes('Obsolete'));assert.equal(h.props.task.id,'workflow-B');assert.equal(h.props.task.parameters.md.temperature,310);assert.equal(reads(h).length,2);assert.deepEqual(writes(h),[]);assert.deepEqual(h.externalErrors,[]);h.unmount();
 });
 
 test('unmount invalidates a pending context and cannot publish a late success or schedule refreshes',async()=>{
@@ -49,7 +49,7 @@ test('changed parent executable/repository facts trigger one scoped reread witho
 test('one passive restoration attempt remains separate from an explicit reconnect and catalog recovery',async()=>{
  let automatic=0,explicit=0;const h=deploymentHarness({properties:{worker:false,restoring:true,onAutomaticRestore:()=>{automatic++;},onReconnect:()=>{explicit++;}}});await h.flush();assert.equal(automatic,0);
  h.update({restoring:false});await h.flush();h.update({restoring:true});await h.flush();h.update({restoring:false});await h.flush();assert.equal(automatic,1);assert.equal(explicit,0);assert.equal(reads(h).length,0);
- h.find(node=>node.type==='button'&&h.text(node)==='恢复此流程的连接').props.onClick();await h.flush();assert.equal(explicit,1);assert.equal(reads(h).length,0,'A callback alone does not assert worker readiness');h.update({worker:true});await h.flush();assert.equal(reads(h).length,1);assert(binding(h).includes('Compute project'));assert.deepEqual(writes(h),[]);h.unmount();
+ h.find(node=>node.type==='button'&&h.text(node)==='恢复此流程的连接').props.onClick();await h.flush();assert.equal(explicit,1);assert.equal(reads(h).length,0,'A callback alone does not assert worker readiness');h.update({worker:true});await h.flush();assert.equal(reads(h).length,1);assert(choices(h).includes('Research environment A'));assert.deepEqual(writes(h),[]);h.unmount();
 });
 
 test('explicit reconnect waits for its acknowledgement before refreshing the actual catalog and prevents duplicate clicks',async()=>{
@@ -61,4 +61,15 @@ test('explicit reconnect waits for its acknowledgement before refreshing the act
 test('resource readiness enables the explicit execution action without requiring optional human review or starting implicitly',async()=>{
  const h=deploymentHarness();await h.flush();assert.equal(execute(h).props.disabled,false);assert.deepEqual(writes(h),[]);h.review();await h.flush();assert.equal(execute(h).props.disabled,false);
  h.update({worker:false,restoring:true});await h.flush();assert.equal(execute(h).props.disabled,true);assert.equal(h.props.task.deployment.prepared.artifactId,'run-workflow-A');assert.deepEqual(writes(h),[]);h.unmount();
+});
+
+test('Selecting a compute resource saves a new deployment without a compute project',async()=>{
+ const h=deploymentHarness();
+ await h.flush();h.target('env-B');await h.flush();h.click('save-deployment');await h.flush();
+ const saves=h.calls.filter(call=>call.method==='task.deployment.save');
+ assert.equal(saves.length,1);
+ assert.equal(saves[0].data.value.targetId,'env-B');
+ assert.equal(saves[0].data.value.projectId,'');
+ assert(!h.calls.some(call=>call.method==='task.deployment.createProject'));
+ assert.throws(()=>h.find(node=>node.props?.['data-testid']==='deployment-project-settings'),/not found/);h.unmount();
 });

@@ -9,5 +9,6 @@ export function validDeployment(value:any):any;
 export function clusterDeploymentChoice(resources:any,profile:any,targetId?:string):any;
 
 export function deploymentCurrent(task:any,authority?:{kind:'local-human';id:string;sha256:string}|null):boolean;
+export function preparedProjectId(task:any):string|undefined;
 
 export function snapshotIdentity(task:any,run:any):string;

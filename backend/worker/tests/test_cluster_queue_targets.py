@@ -88,6 +88,27 @@ class QueueTargetLifecycle(unittest.TestCase):
     def saved_profile(self):
         return self.service.store.get("cluster", self.profile["id"])
 
+    def test_conversation_scope_is_immutable_and_kept_inside_desktop_deployment(self):
+        scope = {
+            "id": "workflow-scope-fixture",
+            "name": "Workflow scope",
+            "conversation_scope": {"owner": "fixture-owner", "workflow": "fixture-workflow"},
+            "policy": {"engines": ["pydyn.md"], "gpus": [], "max_seconds": 60,
+                       "max_concurrent": 1, "input_roots": [str(self.inputs)],
+                       "environments": [], "clusters": [self.profile["id"]]},
+        }
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, "POST", "/api/projects", scope)
+        original = dispatch(self.service, "POST", "/api/projects", scope, admin=True)
+        self.assertEqual(dispatch(self.service, "POST", "/api/projects", scope, admin=True), original)
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, "POST", "/api/projects", {**scope, "name": "Changed"}, admin=True)
+        self.assertNotIn(scope["id"], [row["id"] for row in dispatch(self.service, "GET", "/api/projects", {}, admin=True)])
+        self.assertEqual(dispatch(self.service, "POST", "/api/desktop/deployment-scope/read",
+                                  {"project_id": scope["id"]}, admin=True), scope)
+        with self.assertRaises(PermissionError):
+            dispatch(self.service, "POST", "/api/cluster/prepare", {"spec": {**self.spec(), "project_id": scope["id"]}})
+
     def test_lsf_literal_exclamation_queue_preserves_name_and_still_requires_policy(self):
         target = self.target("owned")
         target["queue"] = "!fixture_owned"

@@ -54,7 +54,7 @@ export function validateDeploymentQos(target,qos){
 }
 
 export function validDeployment(value){
- if(!value||!['local','cluster'].includes(value.target)||typeof value.projectId!=='string'||!value.projectId||typeof value.targetId!=='string'||!value.targetId)throw Error('请选择项目和计算目标');
+ if(!value||!['local','cluster'].includes(value.target)||value.projectId!==undefined&&typeof value.projectId!=='string'||typeof value.targetId!=='string'||!value.targetId)throw Error('请选择已登记的计算资源');
  if(!['local','remote'].includes(value.inputSource||'local')||value.target==='local'&&value.inputSource==='remote')throw Error('无效的输入来源');
  if(!Number.isSafeInteger(value.maxSeconds)||value.maxSeconds<1||value.maxSeconds>604800)throw Error('请设置有效的墙钟时长上限');
  if(typeof value.directoryName!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.directoryName))throw Error('工作目录名仅允许字母、数字、下划线和连字符');
@@ -68,7 +68,7 @@ export function validDeployment(value){
  if(resources.queue_target_id!==undefined&&resources.queue_target_id!==''&&(!queuePolicy||typeof resources.queue_target_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(resources.queue_target_id)))throw Error('无效的队列环境目标');
  validateDeploymentQos(value.target,resources.qos);
  if(resources.account&& !/^[A-Za-z0-9_.@:/+-]{1,128}$/.test(resources.account))throw Error('无效的调度账户');
- return {target:value.target,projectId:value.projectId,targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,...queuePolicy?{queueSelection:'policy'}:{},resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,...resources.qos?{qos:resources.qos}:{},...queuePolicy?{...resources.queue?{queue:resources.queue}:{},...resources.account?{account:resources.account}:{},...resources.queue_target_id?{queue_target_id:resources.queue_target_id}:{}}:{queue:resources.queue||'',account:resources.account||''}},gpu:isLocalGpuId(gpu)?gpu:0};
+ return {target:value.target,projectId:value.projectId??'',targetId:value.targetId,inputSource:value.inputSource||'local',maxSeconds:value.maxSeconds,directoryName:value.directoryName,...queuePolicy?{queueSelection:'policy'}:{},resources:{cpus:resources.cpus,gpus:resources.gpus,memory_mb:resources.memory_mb,...resources.qos?{qos:resources.qos}:{},...queuePolicy?{...resources.queue?{queue:resources.queue}:{},...resources.account?{account:resources.account}:{},...resources.queue_target_id?{queue_target_id:resources.queue_target_id}:{}}:{queue:resources.queue||'',account:resources.account||''}},gpu:isLocalGpuId(gpu)?gpu:0};
 }
 
 // Called only after an explicit target/selection change. Saved drafts are never migrated on read.
@@ -82,6 +82,8 @@ export function clusterDeploymentChoice(resources,profile,targetId=''){
 // Preparation identifies immutable inputs. Review evidence is independent of
 // project permission and must not invalidate an otherwise current attempt.
 export function deploymentCurrent(task,_authority){return !!task.deployment?.prepared&&task.deployment.prepared.parameterRevision===task.parameterRevision&&task.deployment.prepared.deploymentRevision===task.deployment.revision;}
+
+export function preparedProjectId(task){return task.deployment?.prepared?.projectId||task.deployment?.config?.projectId;}
 
 
 export function snapshotIdentity(task,run){return JSON.stringify({runId:run.id,parameterRevision:task.parameterRevision,deploymentRevision:task.deployment?.revision,files:(run.snapshots||[]).map(s=>({name:s.name,sha256:s.sha256,size:s.size})).sort((a,b)=>a.name.localeCompare(b.name))});}

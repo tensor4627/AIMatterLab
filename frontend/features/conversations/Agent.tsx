@@ -35,6 +35,7 @@ import Composer,{ComposerNotice} from './Composer';
 import ComposerQuestion,{composerQuestionItems,initialQuestionProgress,type QuestionProgress} from './ComposerQuestion';
 import SessionWorkspace from './SessionWorkspace';
 import TerminalWorkspaceApproval from './TerminalWorkspaceApproval';
+import ConversationApprovals from './ConversationApprovals';
 
 import ProviderLogin from "../settings/ProviderLogin";
 import {ErrorState,LoadingState} from '../../ui/States';
@@ -1178,6 +1179,7 @@ export default function Agent({terminalDraft,historyTarget,onOpenHistoryLocation
     {connected?<div className="agent-model-controls"><label className="agent-model-field">{t("模型")}<select data-testid="agent-model" value={model} disabled={busy||applying} onChange={e=>void selectModel(e.target.value)}>{!models.length&&<option value="">{t("登录后加载模型目录")}</option>}{models.map(m=><option key={m.id} value={m.model}>{m.providerName?m.providerName+' · ':''}{m.displayName||m.model}</option>)}</select></label><label className="agent-effort-field">{provider==='codex'?'Effort':t('思考设置')}<select data-testid="agent-effort" value={effort} disabled={!connected||busy||applying} onChange={e=>setEffort(e.target.value)}>{!efforts.length&&<option value="">{t('模型默认')}</option>}{efforts.map((e:any)=><option key={e.reasoningEffort} value={e.reasoningEffort}>{provider==='deepseek'?t(e.reasoningEffort==='none'?'快速 · 关闭思考':e.reasoningEffort==='low'?'思考 · 低':e.reasoningEffort==='high'?'思考 · 高':'思考 · 最大'):e.reasoningEffort}</option>)}</select></label></div>:null}
    </div>
    {options&&<div className="agent-options-content" id="agent-options-content" role="region" aria-label={t("Agent 选项")}>
+    {thread&&<ConversationApprovals key={provider+':'+thread} provider={provider} threadId={thread}/>}
     {connected&&<section className="agent-option-section"><div className="agent-option-heading"><h4>{t('连接与调用状态')}</h4><button className="text-button" disabled={busy||connecting||applying} onClick={openAccounts}>{t('管理账号')}</button></div><div className="provider-account" data-testid="provider-access"><span>{t(modelCall?.status==='passed'&&modelCall.provider===provider&&modelCall.model===model&&modelCall.threadId===thread?'当前模型调用已验证':modelCall?.status==='failed'?'当前模型调用未通过':'当前模型调用尚未验证')}</span>{account?.modelAccess==='passed'&&<small>{t('此服务商曾成功回复')}</small>}<small>{t(account?.account?'账户信息可用':account?.credentialStored?'已保存凭据':'账户信息未返回')}</small><small>{t('会话已连接')}</small></div></section>}
     <section className="agent-option-section">
      <label className="agent-follow-up-preference"><span>{t('回复期间按 Enter')}</span>

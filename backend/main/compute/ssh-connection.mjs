@@ -1,6 +1,7 @@
 import {randomBytes,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {taskWorkerSource,validTaskWorkerSource,sameWorkerBinding} from "../../../contracts/compute/task-worker-binding.mjs";
+import {preparedProjectId} from '../../../contracts/compute/deployment.mjs';
 
 
 const object=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
@@ -17,7 +18,8 @@ export function sshTaskSource(records,selection,request){
   const artifact=task.artifacts?.find(item=>item.kind==='cluster-run'&&item.id===request.runId);
   if(!artifact)throw Error('original_run_unavailable');
   value.artifact={id:artifact.id,kind:artifact.kind};
-  if(task.deployment?.prepared?.artifactId===request.runId)value.preparedProject=task.deployment.config?.projectId;
+  if(task.deployment?.prepared?.artifactId===request.runId)value.preparedProject=preparedProjectId(task);
+  else if(artifact.projectId)value.preparedProject=artifact.projectId;
  }
  return value;
 }

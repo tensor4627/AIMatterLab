@@ -17,6 +17,7 @@ const exactThreadId=value=>typeof value==='string'&&value.length>0&&value.length
 const liveItemTypes=new Set(['userMessage','agentMessage','mcpToolCall','commandExecution','fileChange','plan','contextCompaction']);
 const computeQuestionId='compute-resource';
 const choiceFailure=code=>Object.assign(Error(code),{operationNotStarted:true});
+const operationApprovalTimeout=120000;
 
 function rememberLiveTurn(entry,event,params){
  const {turn,turnId,item,itemId,delta}=params,active=entry.liveTurn;
@@ -68,7 +69,7 @@ export class ConversationAgentHub extends EventEmitter{
  get bridgeWorkers(){return (this.scope.getStore()||this.foreground).hub.bridgeWorkers;}
 
  create(provider,threadId,{detached=false}={}){
-  const id=randomUUID(),entry={id,provider,threadId,requests:new Map(),turnId:null,settledTurns:new Set(),preparing:false,closed:false,detached};
+  const id=randomUUID(),entry={id,provider,threadId,requests:new Map(),operationApprovals:new Map(),declinedOperations:new Set(),turnId:null,settledTurns:new Set(),preparing:false,closed:false,detached};
   const opts=this.options,context=()=>entry.hub.contexts.get(provider)||providerContext();
   const hub=this.createHub({...opts,codex:provider==='codex'?this.createCodex():inertCodex,sessionProfileId:id,
    worker:p=>p===provider&&!entry.detached?opts.worker?.(p,id,context()):null,releaseWorker:p=>{if(p===provider&&!entry.detached)opts.releaseWorker?.(p,id);},
@@ -160,6 +161,50 @@ export class ConversationAgentHub extends EventEmitter{
   return {status:'target_selected',resource,retry:{resource_id:resourceId,...access?{access}:{}}};
  }
 
+ async requestOperationApproval(scope,{message,details,desktopRead},{signal}={}){
+  const entry=this.entries.get(scope.sessionId),turnId=entry?.turnId,{threadId}=scope;
+  if(!turnId||entry.detached||entry.provider!==scope.provider)throw choiceFailure('operation_approval_interrupted');
+  const owner=this.questionScope(entry,threadId,turnId);
+  const current=()=>!signal?.aborted&&entry.interruptingTurn!==turnId&&owner.checkCurrent()&&scope.checkCurrent()===true;
+  if(!current())throw choiceFailure('operation_approval_interrupted');
+  const operation=JSON.stringify([message,details]);
+  if(entry.declinedOperations.has(operation))throw choiceFailure('operation_declined_by_user');
+  if([...entry.operationApprovals.values()].some(approval=>approval.operation===operation))throw choiceFailure('operation_approval_pending');
+
+  const id=randomUUID(),{promise,resolve}=Promise.withResolvers();
+  const finish=outcome=>{
+   if(!entry.operationApprovals.delete(String(id)))return;
+   clearTimeout(timer);
+   signal?.removeEventListener('abort',cancel);
+   resolve(outcome);
+   this.receive(entry,{method:'serverRequest/resolved',params:{threadId,requestId:id}});
+  };
+  const cancel=()=>finish('operation_approval_interrupted');
+  const submit=result=>{
+   if(!['accept','decline','cancel'].includes(result.action)||
+      result.action==='accept'&&(!result.content||Array.isArray(result.content)||typeof result.content!=='object'||Object.keys(result.content).length))throw Error('Invalid confirmation response');
+   if(!current()){cancel();return {};}
+   if(result.action==='decline')entry.declinedOperations.add(operation);
+   if(result.action==='accept')this.options.recordOperationApproval?.(scope,{id,operation:message,
+    resource:details.resource,paths:[details.source,details.directory,details.path].filter(value=>typeof value==='string'),desktopRead});
+   finish(result.action==='accept'?'approved':result.action==='decline'?'operation_declined_by_user':'operation_approval_interrupted');
+   return {};
+  };
+  const timer=setTimeout(()=>finish('operation_approval_expired'),operationApprovalTimeout);
+  timer.unref?.();
+  entry.operationApprovals.set(String(id),{operation,submit,cancel});
+  signal?.addEventListener('abort',cancel,{once:true});
+  this.receive(entry,{id,method:'mcpServer/elicitation/request',params:{
+   threadId,turnId,serverName:'AIMatterLab',mode:'form',message,
+   requestedSchema:{type:'object',properties:{},additionalProperties:false},
+   _meta:{codex_approval_kind:'mcp_tool_call',tool_params:details},
+  }});
+  const outcome=await promise;
+  if(!current())throw choiceFailure('operation_approval_interrupted');
+  if(outcome!=='approved')throw choiceFailure(outcome);
+  return true;
+ }
+
  entry(provider,threadId){
   providerId(provider);
   if(threadId!==undefined&&threadId!==null&&!exactThreadId(threadId))throw Error('Invalid conversation identity');
@@ -188,6 +233,7 @@ export class ConversationAgentHub extends EventEmitter{
   if(entry.closed)return;
   entry.closed=true;this.entries.delete(entry.id);
   entry.computeChoice?.cancel();
+  for(const approval of entry.operationApprovals.values())approval.cancel();
   if(this.byThread.get(key(entry.provider,entry.threadId))===entry)this.byThread.delete(key(entry.provider,entry.threadId));
   entry.hub.close();this.dropSession(entry.id);
  }
@@ -264,6 +310,8 @@ export class ConversationAgentHub extends EventEmitter{
    entry.settledTurns.add(turnId);
    entry.turnId=null;
    entry.computeChoice?.cancel();
+   for(const approval of entry.operationApprovals.values())approval.cancel();
+   entry.declinedOperations.clear();
    entry.requests.clear();
    if(entry.provider==='kimi'){
     const bridge=entry.hub.bridge('kimi'),session=bridge?.sessions?.get(threadId);
@@ -271,7 +319,11 @@ export class ConversationAgentHub extends EventEmitter{
    }
    tagged.params.studioTurnBusy=this.busy(entry);
   }
-  if(event.method==='studio/codexDisconnected'){entry.turnId=null;entry.computeChoice?.cancel();entry.requests.clear();}
+  if(event.method==='studio/codexDisconnected'){
+   entry.turnId=null;entry.computeChoice?.cancel();
+   for(const approval of entry.operationApprovals.values())approval.cancel();
+   entry.declinedOperations.clear();entry.requests.clear();
+  }
   if(event.id!==undefined&&threadId){
    entry.requests.set(String(event.id),tagged);
    if(event.method==='item/tool/requestUserInput'&&entry.computeChoice?.id!==event.id)this.bindQuestion(entry,tagged);
@@ -417,6 +469,10 @@ export class ConversationAgentHub extends EventEmitter{
    if(method==='turn/interrupt'||method==='turn/steer'){
     const turnId=method==='turn/interrupt'?params.turnId:params.expectedTurnId;
     if(!turnId||turnId!==entry.turnId)throw Error('The specified reply is no longer active in this conversation');
+    if(method==='turn/interrupt'){
+     entry.interruptingTurn=turnId;
+     for(const approval of entry.operationApprovals.values())approval.cancel();
+    }
    }
    if(['thread/read','thread/resume'].includes(method)&&this.busy(entry)&&params.threadId)return this.readActive(provider,params.threadId,method,params);
    if(!hub.bridge(provider)?.process&&!hub.bridge(provider)?.starting){
@@ -448,6 +504,8 @@ export class ConversationAgentHub extends EventEmitter{
   const request=entry?.requests.get(String(id));
   if(!request)throw Error('Agent request no longer belongs to this conversation');
   if(entry.computeChoice?.id===id)return entry.computeChoice.submit(result);
+  const approval=entry.operationApprovals.get(String(id));
+  if(approval)return approval.submit(result);
   const binding=this.resourceQuestions.get(request),answer=binding&&result?.answers?.[binding.id]?.answers;
   const value=entry.hub.respond(provider,id,result);
   entry.requests.delete(String(id));

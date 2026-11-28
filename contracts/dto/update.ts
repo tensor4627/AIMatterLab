@@ -1,9 +1,11 @@
 export type UpdateSource = 'nju'|'github';
 export type UpdateAccess = Record<UpdateSource,boolean>;
+export interface UpdateAnnouncement {version:string;changes:string[]}
 export interface UpdateState {
   phase: 'disabled'|'idle'|'checking'|'unpublished'|'current'|'available'|'downloading'|'verifying'|'ready'|'preparing'|'installing'|'error';
   currentVersion: string;
   sequence: number;
+  announcement?: UpdateAnnouncement;
   version?: string;
   mode?: 'app'|'delta'|'full';
   bytes?: number;

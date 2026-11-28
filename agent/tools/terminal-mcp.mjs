@@ -82,14 +82,12 @@ export class TerminalMcp {
     const {name,arguments:args={}}=body.params;
     if(this.desktopTools?.owns(name)){
      if(!scope.sessionId||!scope.threadId)throw Error('Select an agent conversation before using managed compute');
-     if(name==='acquire_compute_resource'){
-      const controller=new AbortController(),close=()=>controller.abort();
-      res.once('close',close);
-      try{
-       if(res.destroyed)close();
-       result=toolValueResult(await this.desktopTools.call(name,args,scope,{signal:controller.signal}));
-      }finally{res.off('close',close);}
-     }else result=toolValueResult(await this.desktopTools.call(name,args,scope));
+     const controller=new AbortController(),close=()=>controller.abort();
+     res.once('close',close);
+     try{
+      if(res.destroyed)close();
+      result=toolValueResult(await this.desktopTools.call(name,args,scope,{signal:controller.signal}));
+     }finally{res.off('close',close);}
     }else if(this.projectSkills?.owns(name)){
      result=toolValueResult(await this.projectSkills.call(name,args,scope));
     }else if(this.publicDocs?.definitions.some(tool=>tool.name===name)){

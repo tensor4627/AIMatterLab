@@ -21,6 +21,6 @@ export function interactionModeContext({planningMode=false,reviewMode=false,scop
    'Generate required control files such as run.in or nep.in from the user’s goal, resolved parameters, actual input basenames and the selected software version. Save with write_project_input and read the result back with read_project_input. Bind that path in the control-file field and parameters.files. When a needed decision is still unresolved, keep it editable and report the draft state. On requested changes, synchronize the real control file with the current form values.',
   ].join('\n'),
  };
- const progress='For an action request, take the next available authorized step before reporting status. If a step is blocked, continue independent work, such as inspecting the original target or preparing the remaining inputs. Report the latest observed change or receipt and any exact decision needed to continue. Follow the tool receipt to distinguish a rejected step from a dispatched action awaiting confirmation.';
+ const progress='For an action request, take the next available authorized step. When a supported action needs user permission, use its AIMatterLab confirmation path and wait for the decision on that exact operation. Continue independent work, such as inspecting the original target or preparing the remaining inputs. Report the actual receipt and distinguish pending approval, user decline, a failed check, and an unconfirmed dispatch.';
  return current+guidance[scope]+'\n'+boundary+'\n'+progress;
 }

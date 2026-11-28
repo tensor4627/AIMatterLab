@@ -72,7 +72,7 @@ const tools=Object.freeze([
 /** App-owned active resources, independent of every renderer selection. `publish`,
  * `publishWsl`, `confirmAlias` and `recordUserTurn` are trusted desktop entry points. */
 export function createManagedComputeResources({terminal,profiles,aliases,services,selectionCatalog,taskSource=()=>null,restoreOwner,
- authorizeTerminal=()=>false,authorizeSchedule,authorizeRun,authorizeRunAction, onAcquired=()=>{},onChange=()=>{},
+ authorizeTerminal=()=>false,authorizeSchedule,authorizeRun,authorizeRunAction,requestRunApproval,requestTerminalApproval,offerResourcePicker=false,onAcquired=()=>{},onChange=()=>{},
  onConnectionLost=()=>{},onConnectionReplaced=()=>{},resourceWorkspace,serviceRegistration,terminalAuthorization,developerCompute,
  terminalPolicyRevision=()=>0,busy=()=>false,now=Date.now,uuid=randomUUID}){
  const resources=new Map(),leases=new Map(),publishing=new Map(),scheduledSweeps=new Map(),pendingAcquisitions=new Set();
@@ -511,6 +511,27 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
  const allowed=async(...args)=>!!await authorization(...args);
 
+ async function canApproveTerminal(scope,resource,access){
+  const guarded=access==='command'?commandAvailable(resource):access==='terminal'&&typeof terminalAuthorization?.input==='function';
+  return !!requestTerminalApproval&&guarded&&!!resource.workspaceRegistration&&await authorizeTerminal(scope,resource)!=='denied';
+ }
+
+ async function terminalAuthority(scope,resource,access,check,signal){
+  const authority=await authorization(scope,resource,access,{acquiring:access==='command'});
+  if(authority)return authority;
+  if(!await canApproveTerminal(scope,resource,access))fail('managed_compute_project_grant_required');
+  check();await checkConnection(resource);check();
+  const workspace=resource.workspaceRegistration;
+  const approved=await requestTerminalApproval(scope,desktopView(resource),access,{signal});
+  check();
+  if(signal?.aborted)throw Object.assign(Error('operation_approval_interrupted'),{operationNotStarted:true});
+  if(approved!==true)throw Object.assign(Error('operation_declined_by_user'),{operationNotStarted:true});
+  const latest=resourceWorkspace.resolveHostedResourceWorkspace(workspace.resourceId,{profileId:resource.profileId,hostIdentity:workspace.hostIdentity});
+  if(!latest||latest.workspaceId!==workspace.workspaceId||latest.root!==workspace.root||latest.account!==workspace.account)fail('ssh_workspace_changed');
+  intent.recordChatChannel(scope,resource,access,{confirmed:true});
+  return 'conversation';
+ }
+
  function rememberChannel(scope,lease,access,authority){
   const {resource}=lease,record=resource.hosting;
   if(!record||authority==='developer'||lease.developerWorkspaceId||
@@ -534,7 +555,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const tested=await Promise.all([...resources.values()].filter(resource=>(!kind||resource.kind===kind)&&visible(resource)&&!excluded.has(resource.resourceId)).map(async resource=>{
    const requested=access??defaultAccess(resource);
    if(requested==='service'&&!resource.service||shellAccess(requested)&&resource.kind!=='ssh'||requested==='command'&&!commandAvailable(resource))return null;
-   try{return await allowed(scope,resource,requested,{choosing:true})?resource:null;}catch(error){if(error.message==='managed_compute_context_changed')throw error;return null;}
+   try{return await allowed(scope,resource,requested,{choosing:true})||await canApproveTerminal(scope,resource,requested)?resource:null;}
+   catch(error){if(error.message==='managed_compute_context_changed')throw error;return null;}
   }));
   liveScope(scope);
   return tested.filter(resource=>resource&&resources.get(resource.resourceId)===resource);
@@ -622,7 +644,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const genericAlias=(alias&&genericComputeKind(alias)?alias:null)||resource&&groupMatch(turn,['集群','ssh','cluster','本地','wsl','local'],resource);
   const requested=genericAlias||alias;
   if(!requested||!(genericComputeKind(requested)?requestsComputeName(turn.message,requested):namesInChat(turn.message,requested))){
-   if(!canAskForResource(turn.message,turn.discovered))fail('managed_compute_user_instruction_required');
+   if(!canAskForResource(turn.message,turn.discovered,{offerResourcePicker}))fail('managed_compute_user_instruction_required');
    const alternatives=await availableChoices(scope,resource?.kind,access);
    intent.assertTurn(scope,turn);
    if(!alternatives.length)fail('managed_compute_no_eligible_resource');
@@ -851,7 +873,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    ...serviceReady?{retry:{resource_id:resource.resourceId,access:'service'}}:{}};
  }
 
- async function acquire(scope,args){
+ async function acquire(scope,args,{signal}={}){
   exact(args,['resourceId','profileId','alias','access']);
   if(args.alias===undefined&&args.resourceId===undefined&&args.profileId===undefined||
      args.resourceId!==undefined&&(typeof args.resourceId!=='string'||! /^(?:ssh|wsl):[A-Za-z0-9_-]{1,100}$/.test(args.resourceId))||
@@ -867,6 +889,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    if(args.resourceId!==undefined&&args.resourceId!==resource.resourceId||args.profileId!==undefined&&args.profileId!==resource.profileId)fail('managed_compute_invalid_request');
    const check=()=>{
     liveScope(scope);current(resource);
+    if(signal?.aborted)throw Object.assign(Error('operation_approval_interrupted'),{operationNotStarted:true});
     if(turn)intent.assertTurn(scope,turn);
     if(request.forgotten||request.cancelled.has(resource.resourceId))fail('managed_compute_resource_lease_changed');
    };
@@ -901,8 +924,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     if(access==='command'){
      if(!commandAvailable(resource))fail('managed_compute_command_not_supported');
      const policyCurrent=terminalPolicyGuard(scope,resource);
-     const authority=await authorization(scope,resource,'command',{acquiring:true});
-     if(!authority)fail('managed_compute_project_grant_required');
+     const fresh=()=>{check();policyCurrent();};
+     const authority=await terminalAuthority(scope,resource,'command',fresh,signal);
      check();await checkConnection(resource);check();policyCurrent();
      const lease=selectedLease()??openLease(),reused=lease.command;
      try{
@@ -920,7 +943,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
     if(resource.kind!=='ssh')fail('managed_compute_terminal_not_supported');
    const policyCurrent=terminalPolicyGuard(scope,resource);
    const fresh=()=>{check();policyCurrent();};
-    if(!await allowed(scope,resource,'terminal'))fail('managed_compute_project_grant_required');
+    await terminalAuthority(scope,resource,'terminal',fresh,signal);
     fresh();await checkConnection(resource);fresh();
     // Keep the verified target and requested capability across a mode change.
     // The shell still has to return its own independent ready receipt.
@@ -1323,8 +1346,8 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   const ref={sourceId:service.id,resourceId:resource.resourceId,runId,kind,action};
   await assertRun(scope,resource,service,runId,kind);
   check();
-  const intent=()=>{if(authorizeRunAction?.(scope,ref)!==true)fail('managed_compute_run_intent_required');};
-  intent();
+  const authorized=()=>authorizeRunAction?.(scope,ref)===true;
+  if(!authorized()&&!requestRunApproval)fail('managed_compute_run_intent_required');
   const capability=monitoredSubmit?'managed_submit_monitor_schema':action==='cancel'?'managed_run_action_schema':null;
   const requireCapability=health=>{if(capability&&health?.[capability]!==1)fail('managed_compute_worker_update_required');};
   requireCapability(service.health);
@@ -1337,17 +1360,29 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
    if(!grant)fail('managed_compute_project_grant_required');
    // Observation is passive. In particular, cluster/status can poll the
    // scheduler and cannot substitute for the current immutable worker record.
-   const observation=await anchored(resource,service,'POST',cluster?'/api/cluster/observation':'/api/run/status',{run_id:runId},false,10000,check);
-   check();
-   const run=observation.data;
-   if(observation.status!==200||run?.id!==runId||run.project_id!==scope.projectId||
-      !(cluster?grant.clusterIds.includes(run.cluster_id):grant.environmentIds.includes(run.environment_id)))fail('managed_compute_run_source_changed');
-   if(run.status==='unknown'||run.studio_workflow_binding||run.managed_child||run.superseded_by)fail('managed_compute_run_state_unconfirmed');
-   if(action==='cancel'){
-    if(!['queued','running'].includes(run.status)||run.cancel_requested||cluster&&!/^[0-9]+$/.test(run.job_id||''))fail('managed_compute_run_state_unconfirmed');
-   }else if(!['draft','ready'].includes(run.status)||run.submit_attempted||run.job_id||dispatchedRunActions.has(JSON.stringify([runKey,'submit'])))fail('managed_compute_run_state_unconfirmed');
+   const observe=async()=>{
+    const observation=await anchored(resource,service,'POST',cluster?'/api/cluster/observation':'/api/run/status',{run_id:runId},false,10000,check);
+    check();
+    const run=observation.data;
+    if(observation.status!==200||run?.id!==runId||run.project_id!==scope.projectId||
+       !(cluster?grant.clusterIds.includes(run.cluster_id):grant.environmentIds.includes(run.environment_id)))fail('managed_compute_run_source_changed');
+    if(run.status==='unknown'||run.studio_workflow_binding||run.managed_child||run.superseded_by)fail('managed_compute_run_state_unconfirmed');
+    if(action==='cancel'){
+     if(!['queued','running'].includes(run.status)||run.cancel_requested||cluster&&!/^[0-9]+$/.test(run.job_id||''))fail('managed_compute_run_state_unconfirmed');
+    }else if(!['draft','ready'].includes(run.status)||run.submit_attempted||run.job_id||dispatchedRunActions.has(JSON.stringify([runKey,'submit'])))fail('managed_compute_run_state_unconfirmed');
+    return run;
+   };
+   const run=await observe();
+   let approvalCurrent;
+   if(!authorized()&&requestRunApproval){
+    approvalCurrent=await requestRunApproval(scope,ref,run,view(resource),{signal:data.signal});
+    check();
+    if(approvalCurrent&&!equal(await observe(),run))fail('managed_compute_run_state_unconfirmed');
+   }
    const beforeDispatch=observed=>{
-    check();intent();requireCapability(observed);
+    check();
+    if(approvalCurrent?approvalCurrent()!==true:!authorized())fail('managed_compute_run_intent_required');
+    requireCapability(observed);
     // The worker has its own durable reservation under its Store lock. This
     // app also suppresses uncertain duplicate actions before they reach it.
     if(action!=='validate')dispatchedRunActions.add(attemptKey);
@@ -1375,7 +1410,7 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
  }
 
  async function serviceRequest(scope,data){
-  exact(data,['resourceId','method','target','data','mcp','timeoutMs','checkCurrent','beforeScheduleDispatch','onDispatch'],['resourceId','method','target']);
+  exact(data,['resourceId','method','target','data','mcp','timeoutMs','checkCurrent','beforeScheduleDispatch','onDispatch','signal'],['resourceId','method','target']);
   const {lease,service,grant}=await resolveLease(scope,data.resourceId,'service'),resource=lease.resource;
   const check=()=>{assertLease(scope,lease);assertResourceIntent(scope,resource);data.checkCurrent?.();};
   const payload=data.data;
@@ -1589,11 +1624,11 @@ export function createManagedComputeResources({terminal,profiles,aliases,service
   return Promise.allSettled([...resources.values()].map(resource=>remove(resource,{preserve:true})));
  }
  const owns=name=>tools.some(tool=>tool.name===name);
- function callTool(name,args,scope){
+ function callTool(name,args,scope,options){
   if(name==='list_compute_resources'){exact(args,[]);return list(scope);}
   if(name==='acquire_compute_resource'){
    exact(args,['resource_id','profile_id','alias','access']);
-   return acquire(scope,Object.fromEntries(Object.entries(args).map(([key,value])=>[{resource_id:'resourceId',profile_id:'profileId'}[key]??key,value])));
+   return acquire(scope,Object.fromEntries(Object.entries(args).map(([key,value])=>[{resource_id:'resourceId',profile_id:'profileId'}[key]??key,value])),options);
   }
   if(name==='release_compute_resource'){exact(args,['resource_id'],['resource_id']);return release(scope,{resourceId:args.resource_id});}
   if(name==='run_compute_command')return runCommand(scope,args);

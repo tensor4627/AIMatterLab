@@ -38,6 +38,7 @@ const workspaceGuideFingerprints=[
  [4518,'8d14a66167ce2398c5d04338b6aca4544ef971b8ad8a77fa4a6b8bccc2f573c6'], // 0.2.8 runtime guide
  [4479,'3ff529bc45a11e2a6d7b2689476646bd2e06137c0967deff61d2c5bc6bcb3fe9'], // workspace guide used by the post-0.2.8 candidate
  [4524,'eb45f442be4d7c52c48401904bb0545e7fa80546837fbc99e9c3fcf2eb89550f'], // 0.2.10 runtime guide
+ [4548,'cac10826fc5d297ddf7d9b6608c260905a25020b84402630a755fcfe84d71fea'], // 0.2.13 runtime guide
 ].sort(([leftLength],[rightLength])=>rightLength-leftLength);
 
 function workspaceNotes(text) {

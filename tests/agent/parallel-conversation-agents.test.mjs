@@ -325,6 +325,36 @@ test('the authenticated MCP acquisition holds a desktop picker in its owning tur
  assert.throws(()=>f.agents.respond('deepseek','gamma',retryQuestion.id,answer),/no longer belongs/);
 });
 
+test('operation confirmation stays with its originating turn until approval, decline or interruption',async t=>{
+ const f=fixture();t.after(()=>f.agents.close());
+ const bridge=await f.activate('codex','alpha');
+ await f.activate('deepseek','gamma');
+ await f.send('codex','alpha');await f.send('deepseek','gamma');
+ const scope=f.agents.captureToolScope(f.lease('codex',bridge));
+ const operation={message:'Read this file?',details:{source:'fixture-input.xyz'}};
+ const ask=()=>f.agents.requestOperationApproval(scope,operation);
+ const last=()=>f.events.findLast(event=>event.method==='mcpServer/elicitation/request');
+ const approved={action:'accept',content:{}};
+ const pending=ask(),first=last();
+ assert.equal(first.params.turnId,'turn-alpha');
+ assert.deepEqual(f.agents.historySession('codex','alpha').requests,[first]);
+ await assert.rejects(ask(),/operation_approval_pending/);
+ assert.throws(()=>f.agents.respond('deepseek','gamma',first.id,approved),/belongs to this conversation/);
+ assert.throws(()=>f.agents.respond('codex','alpha',first.id,{...approved,content:{source:'another-file'}}),/Invalid confirmation/);
+ f.agents.respond('codex','alpha',first.id,approved);
+ assert.equal(await pending,true);assert.deepEqual(f.agents.historySession('codex','alpha').requests,[]);
+ assert.equal(bridge.approvals.size,0);
+
+ const denied=assert.rejects(ask(),/operation_declined_by_user/),second=last();
+ f.agents.respond('codex','alpha',second.id,{action:'decline',content:null});await denied;
+ await assert.rejects(ask(),/operation_declined_by_user/);assert.equal(last(),second);
+
+ const interrupted=assert.rejects(f.agents.requestOperationApproval(scope,{...operation,details:{source:'fixture-two.xyz'}}),/operation_approval_interrupted/),third=last();
+ await f.agents.rpc('codex','turn/interrupt',{threadId:'alpha',turnId:'turn-alpha'});await interrupted;
+ assert.throws(()=>f.agents.respond('codex','alpha',third.id,approved),/belongs to this conversation/);
+ assert.deepEqual(f.agents.historySession('deepseek','gamma').requests,[]);
+});
+
 test('a completed reply cannot reopen or modify its conversation during the next reply',async t=>{
  const f=fixture();t.after(()=>f.agents.close());
  await f.select('codex','alpha');

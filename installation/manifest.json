@@ -22,6 +22,6 @@
     "sampling": "fixture_required",
     "neb": "fixture_required"
   },
-  "distribution_status": "not_run",
-  "distribution_scope": "AIMatterLab 0.2.13 source release candidate. See docs/releases/aimatterlab-0.2.13.md for validation scope."
+  "distribution_status": "signed_windows_x64",
+  "distribution_scope": "AIMatterLab 0.2.13 source and signed Windows x64 release. See docs/releases/aimatterlab-0.2.13.md for validation scope."
 }

@@ -19,7 +19,7 @@ type Props={taskId:string;revision:string;connected:boolean;disabled:boolean;con
 function Snapshot({review}:{review:RoadmapPreview}){
  const {snapshot}=review;
  return <div aria-label={t('执行快照')}><p>{snapshot.original_request}</p>
-  <p>{t('计算项目')} {snapshot.target.project_id} · {snapshot.target.cluster_id||snapshot.target.environment_id} · {snapshot.target.max_seconds} s</p>
+  <p>{t('计算资源')} {snapshot.target.cluster_id||snapshot.target.environment_id} · {snapshot.target.max_seconds} s</p>
   {snapshot.workspace?.choice==='session'&&<p>{t('工作目录')} · <code dir="ltr">{snapshot.workspace.root}</code></p>}
   {snapshot.steps.map(node=><Disclosure key={node.id} summary={<>{node.label} · {node.tool} · {node.version.version.slice(0,12)}</>}>
    <p>{t('工具版本')} · {node.version.version}</p>{node.registered_function&&<p>{node.registered_function.function_id} · {node.registered_function.package_version}</p>}
@@ -66,9 +66,9 @@ export default function RoadmapExecutionPanel({taskId,revision,connected,disable
    if(disposed||context.taskId!==taskId)return;
    const profile=context.clusters.find(item=>item.id===defaultEnvironment),targets=profile?.queue_targets;
    const policy=context.projects.find(item=>item.id===projectId)?.policy.cluster_queue_policies?.[defaultEnvironment];
-   if(Array.isArray(targets)&&policy?.profile_version===profile?.version)setQueueOptions((policy?.new_submission_order||[]).flatMap(id=>{
-    const target=targets.find(item=>item?.id===id&&item.enabled&&typeof item.queue==='string');return target?[{id,name:target.queue}]:[];
-   }));
+   if(!Array.isArray(targets))return;
+   const choices=projectId?(policy?.profile_version===profile?.version?policy?.new_submission_order.map(id=>targets.find(item=>item?.id===id)):[]):targets.filter(item=>item?.usage_class==='owned');
+   setQueueOptions((choices||[]).filter(item=>item?.enabled&&typeof item.queue==='string').map(item=>({id:item.id,name:item.queue})));
   },error=>{if(!disposed)setError(String(error.message||error));});
   return()=>{disposed=true;};
  },[cluster,open,connected,taskId,defaultEnvironment,projectId]);
@@ -103,7 +103,7 @@ export default function RoadmapExecutionPanel({taskId,revision,connected,disable
   finally{operation.current=false;if(live.current)setBusy(false);}
  }
  return <Disclosure className="card roadmap-execution" ref={root} open={open} onToggle={e=>setOpen(e.currentTarget.open)} data-testid="roadmap-execution" summary={<>{t('按流程图执行')}</>}>
-  {!configured&&<p>{t('请先保存计算项目与部署目标。')}</p>}
+  {!configured&&<p>{t('请先保存所选计算资源。')}</p>}
   {configured&&<Disclosure summary={<>{t(cluster?'各步骤的队列与环境':'各步骤的计算环境')}</>}>{nodes.map(node=><label key={node.id}>{node.label} <select disabled={busy||disabled} value={selected[node.id]||''} onChange={event=>setSelected({...selected,[node.id]:event.target.value})}>
    <option value="">{t(cluster?'部署队列':'部署环境')} · {defaultEnvironment}</option>{(cluster?queueOptions:environments).map(env=><option key={env.id} value={env.id}>{env.name} · {env.id}</option>)}</select></label>)}</Disclosure>}
   <div className="button-row"><Button variant={review?'secondary':'primary'} data-testid="roadmap-preview" data-guide-target="roadmap-preview" disabled={busy||disabled||!connected||!configured} onClick={()=>void act(false)}>{t('核对执行快照')}</Button>

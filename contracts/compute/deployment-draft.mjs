@@ -9,7 +9,7 @@ export function sameDeploymentConfig(a,b){try{return canonical(validDeployment(a
 export function validDeploymentDraft(value){
  if(!object(value)||Object.keys(value).some(key=>!['target','projectId','targetId','inputSource','directoryName','maxSeconds','gpu','resources','queueSelection'].includes(key))||!['local','cluster'].includes(value.target)||!['local','remote'].includes(value.inputSource))throw Error('部署草稿字段无效');
  if(value.queueSelection!==undefined&&(value.queueSelection!=='policy'||value.target!=='cluster'))throw Error('部署草稿队列选择方式无效');
- for(const [key,limit]of [['projectId',200],['targetId',200],['directoryName',128]])if(typeof value[key]!=='string'||value[key].length>limit||/[\0\r\n]/.test(value[key]))throw Error('部署草稿字段无效：'+key);
+ for(const [key,limit]of [['projectId',200],['targetId',200],['directoryName',128]])if((key!=='projectId'||value[key]!==undefined)&&(typeof value[key]!=='string'||value[key].length>limit||/[\0\r\n]/.test(value[key])))throw Error('部署草稿字段无效：'+key);
  for(const key of ['gpu','maxSeconds'])if(!Number.isSafeInteger(value[key])||Math.abs(value[key])>1e9)throw Error('部署草稿数值无效：'+key);
  const resources=value.resources;if(!object(resources)||Object.keys(resources).some(key=>!['queue','account','cpus','gpus','memory_mb','qos','queue_target_id'].includes(key)))throw Error('部署草稿资源字段无效');
  validateDeploymentQos(value.target,resources.qos);

@@ -944,7 +944,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
         prefix = directory_prefix(spec.get("directory_name"))
         spec["inputs"], spec["remote_inputs"] = local_inputs, remote_inputs
         project, p = self.allowed(spec["project_id"], spec["cluster_id"])
-        if remote_inputs and not p.get("read_roots"):
+        scoped_sources = (project.get('conversation_scope') or {}).get('remoteInputs', [])
+        if remote_inputs and not p.get("read_roots") and not scoped_sources:
             raise PermissionError("Register explicit remote read roots before importing inputs")
         if spec["engine"] not in project["policy"]["engines"] or (spec["engine"] not in SUPPORTED_ENGINES and not (bound and private_engine(spec["engine"]))):
             raise PermissionError("Engine is not authorized")
@@ -1022,7 +1023,8 @@ print('__STUDIO_JSON__'+json.dumps(out))
                     snapshot = {"name":name, "source":str(source), "source_kind":"local", "sha256":sha256, "size":size}
                 else:
                     source = remote_inputs[name]
-                    meta = self._download(p, source, p["read_roots"], dst, TRANSFER_TOTAL - total)
+                    roots = [source] if source in scoped_sources else p.get('read_roots', [])
+                    meta = self._download(p, source, roots, dst, TRANSFER_TOTAL - total)
                     snapshot = {"name":name, "source":source, "source_kind":"remote", "cluster_id":p["id"],
                                 "sha256":meta["sha256"], "size":meta["size"], "remote_identity":meta["identity"]}
                 total += snapshot["size"]

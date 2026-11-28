@@ -16,7 +16,11 @@ function policyShape(project,config,engine){
 export function consumerTargetScope({task,science,config,project,runtime}){
  const c=configShape(config),engine=task?.parameters?.engine;
  requireThat(task?.workflowVersion===2&&text(task.id)&&['codex','kimi','qwen','deepseek','compatible'].includes(task.provider)&&text(task.threadId)&&integer(task.parameterRevision)&&['bias.validate','gpumd.sampling'].includes(engine)&&science?.engine===engine&&science.spec?.engine===engine&&sha(science.closureSha)&&['local-human','input-observation'].includes(science.authority?.kind)&&text(science.authority.id)&&sha(science.authority.sha256),'current independently human-reviewed scientific input closure required');
- requireThat(science.consumerConstraints?.target==='local'&&science.consumerConstraints.projectId===c.projectId&&science.consumerConstraints.artifactBackend==='torchscript','consumer project/backend must match current actual successful producer constraint');
+ const scoped=project?.conversation_scope;
+ const producerProject=science.consumerConstraints?.projectId;
+ const producerMatches=scoped?scoped.workflow===task.id&&scoped.owner===createHash('sha256').update(JSON.stringify([task.provider,task.threadId])).digest('hex')&&
+  typeof producerProject==='string'&&producerProject===task.consumerArtifact?.producerProjectId:producerProject===c.projectId;
+ requireThat(science.consumerConstraints?.target==='local'&&producerMatches&&science.consumerConstraints.artifactBackend==='torchscript','consumer scope/backend must match current actual successful producer constraint');
  const policy=policyShape(project,c,engine),facts=runtime?.facts;
  requireThat(runtime?.status==='observed'&&sha(runtime.receipt)&&facts?.state==='observed'&&facts.environment_id===c.targetId&&facts.engine===engine&&sha(facts.configuration_sha256)&&facts.python?.registration_match===true&&absolute(facts.python.executable)&&absolute(facts.executables?.python)&&facts.file_observations_status?.status==='passed'&&facts.cuda?.available===true,'current target-specific observed runtime, configured/observed Python and CUDA required');
  if(engine==='gpumd.sampling')requireThat(absolute(facts.executables['gpu-sampling'])&&['passed','not_run'].includes(facts.native_runtime?.status),'registered native GPU-Sampling runtime required; loader probe is distinct from actual execution');

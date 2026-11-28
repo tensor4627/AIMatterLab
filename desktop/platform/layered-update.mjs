@@ -163,4 +163,5 @@ export async function acknowledgeLayeredStartup(workspace,version,workbench) {
   } while (!rendered && Date.now()<until);
   if (!rendered) throw Error('The updated AIMatterLab workbench did not start');
   await writeJson(started,{pid:process.pid,token,version});
+  return true;
 }

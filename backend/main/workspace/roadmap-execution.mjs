@@ -5,6 +5,8 @@ import {assertConfirmedDeployment,assertDeploymentWorker} from './deployment-sta
 import {isSshWorkerBinding,sameSshWorkerData,sameWorkerBinding,taskWorkerSource} from '../../../contracts/compute/task-worker-binding.mjs';
 import {parameterValue,setParameter} from '../../../contracts/workflows/task-fields.mjs';
 import {linuxPath} from '../../../contracts/transport-policy.mjs';
+import {validDeployment} from '../../../contracts/compute/deployment.mjs';
+import {ensureWorkflowDeploymentScope} from './workflow-deployment-scope.mjs';
 
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const executionId=(taskId,sha256)=>createHash('sha256').update(JSON.stringify([taskId,sha256])).digest('hex');
@@ -48,7 +50,7 @@ export function createRoadmapController({worker,current,getSettings,getTask,cata
   assertConfirmedDeployment(task);
   const config=task.deployment?.config;
   const remote=worker.identity?.kind==='ssh';
-  if(!task.roadmap||config?.target!==(remote?'cluster':'local')||!task.deployment.workerBinding||!sameWorkerBinding(task.deployment.workerBinding,worker))throw Error('请先保存计算项目及目标资源，并连接此流程的原作业服务。');
+  if(!task.roadmap||config?.target!==(remote?'cluster':'local')||!task.deployment.workerBinding||!sameWorkerBinding(task.deployment.workerBinding,worker))throw Error('请先保存所选计算资源，并连接此流程的原作业服务。');
   const existing=remote&&task.workspaceChoice==='pending'?sessionWorkspace(task):null;
   if(task.workspaceChoice==='pending'&&!existing)throw Error('请先选择此流程的工作区。');
   let parameters=structuredClone(task.parameters);
@@ -66,6 +68,17 @@ export function createRoadmapController({worker,current,getSettings,getTask,cata
    roadmap:structuredClone(task.roadmap),parameters,target:{project_id:config.projectId,gpu:config.gpu??0,max_seconds:config.maxSeconds,
     ...(remote?{cluster_id:config.targetId,resources:Object.fromEntries(Object.entries(config.resources).filter(([key,v])=>v!==''&&(!config.queueSelection||!['queue','account'].includes(key)))),
       conversation:{provider:task.provider,thread_id:task.threadId}}:{environment_id:config.targetId})}};
+ }
+ async function authorizePlan(task,source,guard){
+  if(source.target.project_id)return source;
+  const graph=source.roadmap,remote=!!source.target.cluster_id;
+  const localInputs=graph.resources.filter(file=>graph.inputs.includes(file.id))
+   .flatMap(file=>[parameterValue(source.parameters,file.field)].flat())
+   .filter(file=>typeof file==='string'&&file);
+  const projectId=await ensureWorkflowDeploymentScope(worker,task,validDeployment(task.deployment.config),{
+   engines:graph.steps.map(step=>step.tool),localInputs,environments:remote?[]:Object.values(source.node_environments),
+  },guard);
+  return {...source,target:{...source.target,project_id:projectId}};
  }
  async function start(taskId){
   deploymentOwner(taskId);
@@ -117,25 +130,25 @@ export function createRoadmapController({worker,current,getSettings,getTask,cata
  }
  return {
   async preview(value){
-   request(value,['taskId','environments']);const ticket=await start(value.taskId),source=plan(deploymentOwner(value.taskId),value.environments);
-   const result=await post('preview',source);ticket.assert();
-   if(!equal(plan(deploymentOwner(value.taskId),value.environments),source))throw Error('流程已修改，请重新核对。');
+   request(value,['taskId','environments']);const ticket=await start(value.taskId),task=deploymentOwner(value.taskId),source=plan(task,value.environments);
+   const guard=()=>{ticket.assert();if(!equal(plan(deploymentOwner(value.taskId),value.environments),source))throw Error('流程已修改，请重新核对。');};
+   const result=await post('preview',await authorizePlan(task,source,guard));guard();
    if(source.target.cluster_id&&result.task_id===value.taskId&&Array.isArray(result.missing_tools)&&result.missing_tools.length)return result;
    if(!hash(result.snapshot_sha256)||result.snapshot?.task_id!==value.taskId)throw Error('流程快照尚未核对。');
    return result;
   },
   async confirm(value,event){
    request(value,['taskId','snapshotSha256','environments']);if(!hash(value.snapshotSha256))throw Error('Reviewed snapshot required');
-   assertIdle();const ticket=await start(value.taskId),source=plan(deploymentOwner(value.taskId),value.environments);
+   assertIdle();const ticket=await start(value.taskId),task=deploymentOwner(value.taskId),source=plan(task,value.environments);
    const guard=()=>{ticket.assert();assertIdle();if(!equal(plan(deploymentOwner(value.taskId),value.environments),source))throw Error('流程已修改，请重新核对。');};
-   const review=await post('preview',source);guard();
+   const authorized=await authorizePlan(task,source,guard),review=await post('preview',authorized);guard();
    if(review.snapshot_sha256!==value.snapshotSha256||review.snapshot?.task_id!==value.taskId)throw Error('输入、参数或工具版本已变化，请重新核对。');
    if(!await confirm(review,event))return null;
    guard();
    const workspace=source.target.cluster_id?await allocateWorkspace({task:deploymentOwner(value.taskId),requestId:value.snapshotSha256},guard):null;
    if(source.workspace.choice==='session'&&(workspace?.workspace_id!==source.workspace.id||workspace?.path!==source.workspace.root))
     throw Error('ssh_workspace_changed');
-   guard();const state=await post('confirm',{plan:source,snapshot_sha256:value.snapshotSha256,...workspace?{workspace_receipt:workspace}:{}});
+   guard();const state=await post('confirm',{plan:authorized,snapshot_sha256:value.snapshotSha256,...workspace?{workspace_receipt:workspace}:{}});
    ticket.assert();if(state.snapshot_sha256!==value.snapshotSha256)throw Error('Worker confirmed a different snapshot');
    note(value.taskId,ticket.binding,state);return state;
   },
